@@ -562,8 +562,8 @@ public abstract class OGLSurfaceData extends SurfaceData
             // disposing the native resources (e.g. texture object)
             OGLContext.setScratchSurface(graphicsConfig);
 
-            RenderBuffer buf = rq.getBuffer();
             rq.ensureCapacityAndAlignment(12, 4);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(FLUSH_SURFACE);
             buf.putLong(getNativeOps());
 
@@ -590,8 +590,8 @@ public abstract class OGLSurfaceData extends SurfaceData
             // disposing the native resources (e.g. texture object)
             OGLContext.setScratchSurface(gc);
 
-            RenderBuffer buf = rq.getBuffer();
             rq.ensureCapacityAndAlignment(12, 4);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(DISPOSE_SURFACE);
             buf.putLong(pData);
 
@@ -606,8 +606,9 @@ public abstract class OGLSurfaceData extends SurfaceData
         OGLRenderQueue rq = OGLRenderQueue.getInstance();
         rq.lock();
         try {
-            RenderBuffer buf = rq.getBuffer();
+
             rq.ensureCapacityAndAlignment(12, 4);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(SWAP_BUFFERS);
             buf.putLong(window);
             rq.flushNow();

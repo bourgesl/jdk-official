@@ -30,10 +30,8 @@ import java.awt.geom.Path2D;
 import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
 import sun.java2d.loops.GraphicsPrimitive;
-import sun.java2d.pipe.BufferedRenderPipe;
-import sun.java2d.pipe.ParallelogramPipe;
-import sun.java2d.pipe.RenderQueue;
-import sun.java2d.pipe.SpanIterator;
+import sun.java2d.pipe.*;
+
 import static sun.java2d.pipe.BufferedOpCodes.*;
 
 class OGLRenderer extends BufferedRenderPipe {
@@ -91,6 +89,7 @@ class OGLRenderer extends BufferedRenderPipe {
                                        null, null, null, ctxflags);
 
             rq.ensureCapacity(28);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(COPY_AREA);
             buf.putInt(x).putInt(y).putInt(w).putInt(h);
             buf.putInt(dx).putInt(dy);

@@ -234,6 +234,10 @@ public abstract class SunToolkit extends Toolkit
         AWT_LOCK.lock();
     }
 
+    public static final boolean awtTryLock(long time, TimeUnit unit) throws InterruptedException {
+      return AWT_LOCK.tryLock(time, unit);
+    }
+
     public static final boolean awtTryLock() {
         return AWT_LOCK.tryLock();
     }

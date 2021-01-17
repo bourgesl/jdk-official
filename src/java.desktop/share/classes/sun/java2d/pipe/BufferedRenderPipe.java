@@ -62,12 +62,10 @@ public abstract class BufferedRenderPipe
     static final int BYTES_PER_SPAN = 16;
 
     protected RenderQueue rq;
-    protected RenderBuffer buf;
     private BufferedDrawHandler drawHandler;
 
     public BufferedRenderPipe(RenderQueue rq) {
         this.rq = rq;
-        this.buf = rq.getBuffer();
         this.drawHandler = new BufferedDrawHandler();
     }
 
@@ -92,6 +90,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(20);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_LINE);
             buf.putInt(x1 + transx);
             buf.putInt(y1 + transy);
@@ -109,6 +108,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(20);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_RECT);
             buf.putInt(x + sg2d.transX);
             buf.putInt(y + sg2d.transY);
@@ -126,6 +126,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(20);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(FILL_RECT);
             buf.putInt(x + sg2d.transX);
             buf.putInt(y + sg2d.transY);
@@ -209,11 +210,13 @@ public abstract class BufferedRenderPipe
             int pointBytesRequired = nPoints * BYTES_PER_POLY_POINT;
             int totalBytesRequired = 20 + pointBytesRequired;
 
+            RenderBuffer buf = rq.getBuffer();
             if (totalBytesRequired <= buf.capacity()) {
                 if (totalBytesRequired > buf.remaining()) {
                     // process the queue first and then enqueue the points
-                    rq.flushNow();
+                    rq.flushNow(false);
                 }
+                buf = rq.getBuffer();
                 buf.putInt(DRAW_POLY);
                 // enqueue parameters
                 buf.putInt(nPoints);
@@ -291,6 +294,7 @@ public abstract class BufferedRenderPipe
         public void drawLine(int x1, int y1, int x2, int y2) {
             // assert rq.lock.isHeldByCurrentThread();
             rq.ensureCapacity(20);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_LINE);
             buf.putInt(x1);
             buf.putInt(y1);
@@ -301,6 +305,7 @@ public abstract class BufferedRenderPipe
         public void drawPixel(int x, int y) {
             // assert rq.lock.isHeldByCurrentThread();
             rq.ensureCapacity(12);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_PIXEL);
             buf.putInt(x);
             buf.putInt(y);
@@ -315,6 +320,7 @@ public abstract class BufferedRenderPipe
         private int remainingScanlines;
 
         private void resetFillPath() {
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_SCANLINES);
             scanlineCountIndex = buf.position();
             buf.putInt(0);
@@ -323,7 +329,8 @@ public abstract class BufferedRenderPipe
         }
 
         private void updateScanlineCount() {
-            buf.putInt(scanlineCountIndex, scanlineCount);
+          RenderBuffer buf = rq.getBuffer();
+          buf.putInt(scanlineCountIndex, scanlineCount);
         }
 
         /**
@@ -338,9 +345,10 @@ public abstract class BufferedRenderPipe
         public void drawScanline(int x1, int x2, int y) {
             if (remainingScanlines == 0) {
                 updateScanlineCount();
-                rq.flushNow();
+                rq.flushNow(false); //TODO: WHY?!?!?!
                 resetFillPath();
             }
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(x1);
             buf.putInt(x2);
             buf.putInt(y);
@@ -397,6 +405,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(24); // so that we have room for at least a span
+            RenderBuffer buf = rq.getBuffer();
             int newpos = fillSpans(rq, buf.getAddress(),
                                    buf.position(), buf.capacity(),
                                    si, si.getNativeIterator(),
@@ -418,6 +427,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(28);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(FILL_PARALLELOGRAM);
             buf.putFloat((float) x);
             buf.putFloat((float) y);
@@ -442,6 +452,7 @@ public abstract class BufferedRenderPipe
         try {
             validateContext(sg2d);
             rq.ensureCapacity(36);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DRAW_PARALLELOGRAM);
             buf.putFloat((float) x);
             buf.putFloat((float) y);
@@ -468,6 +479,7 @@ public abstract class BufferedRenderPipe
             try {
                 validateContextAA(sg2d);
                 rq.ensureCapacity(28);
+                RenderBuffer buf = rq.getBuffer();
                 buf.putInt(FILL_AAPARALLELOGRAM);
                 buf.putFloat((float) x);
                 buf.putFloat((float) y);
@@ -492,6 +504,7 @@ public abstract class BufferedRenderPipe
             try {
                 validateContextAA(sg2d);
                 rq.ensureCapacity(36);
+                RenderBuffer buf = rq.getBuffer();
                 buf.putInt(DRAW_AAPARALLELOGRAM);
                 buf.putFloat((float) x);
                 buf.putFloat((float) y);

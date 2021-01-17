@@ -103,7 +103,6 @@ public abstract class BufferedTextPipe extends GlyphListPipe {
                                   final GlyphList gl)
     {
         // assert rq.lock.isHeldByCurrentThread();
-        RenderBuffer buf = rq.getBuffer();
         final int totalGlyphs = gl.getNumGlyphs();
         int glyphBytesRequired = totalGlyphs * BYTES_PER_GLYPH_IMAGE;
         int posBytesRequired =
@@ -116,14 +115,16 @@ public abstract class BufferedTextPipe extends GlyphListPipe {
 
         // make sure the RenderQueue keeps a hard reference to the FontStrike
         // so that the associated glyph images are not disposed while enqueued
-        rq.addReference(gl.getStrike());
-
+        rq.addReference(gl.getStrike()); // TODO: reference enqueue before flush -> strike might have been garbage collected!!
+        RenderBuffer buf = rq.getBuffer();
         if (totalBytesRequired <= buf.capacity()) {
             if (totalBytesRequired > buf.remaining()) {
                 // process the queue first and then enqueue the glyphs
                 rq.flushNow();
             }
             rq.ensureAlignment(20);
+            rq.addReference(gl.getStrike());
+            buf = rq.getBuffer();
             buf.putInt(DRAW_GLYPH_LIST);
             // enqueue parameters
             buf.putInt(totalGlyphs);

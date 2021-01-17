@@ -89,7 +89,6 @@ public abstract class BufferedContext {
     @Native public static final int USE_MASK         = (1 << 1);
 
     private final RenderQueue rq;
-    private final RenderBuffer buf;
 
     /**
      * This is a reference to the most recently validated BufferedContext.  If
@@ -114,7 +113,6 @@ public abstract class BufferedContext {
 
     protected BufferedContext(RenderQueue rq) {
         this.rq = rq;
-        this.buf = rq.getBuffer();
     }
 
     /**
@@ -326,6 +324,7 @@ public abstract class BufferedContext {
     {
         // assert rq.lock.isHeldByCurrentThread();
         rq.ensureCapacityAndAlignment(20, 4);
+        RenderBuffer buf = rq.getBuffer();
         buf.putInt(SET_SURFACES);
         buf.putLong(srcData.getNativeOps());
         buf.putLong(dstData.getNativeOps());
@@ -334,6 +333,7 @@ public abstract class BufferedContext {
     private void resetClip() {
         // assert rq.lock.isHeldByCurrentThread();
         rq.ensureCapacity(4);
+        RenderBuffer buf = rq.getBuffer();
         buf.putInt(RESET_CLIP);
     }
 
@@ -341,11 +341,13 @@ public abstract class BufferedContext {
         // assert rq.lock.isHeldByCurrentThread();
         if (clip.isRectangular()) {
             rq.ensureCapacity(20);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(SET_RECT_CLIP);
             buf.putInt(clip.getLoX()).putInt(clip.getLoY());
             buf.putInt(clip.getHiX()).putInt(clip.getHiY());
         } else {
             rq.ensureCapacity(28); // so that we have room for at least a span
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(BEGIN_SHAPE_CLIP);
             buf.putInt(SET_SHAPE_CLIP_SPANS);
             // include a placeholder for the span count
@@ -358,7 +360,8 @@ public abstract class BufferedContext {
             while (si.nextSpan(span)) {
                 if (remainingSpans == 0) {
                     buf.putInt(countIndex, spanCount);
-                    rq.flushNow();
+                    rq.flushNow(false);
+                    buf = rq.getBuffer();
                     buf.putInt(SET_SHAPE_CLIP_SPANS);
                     countIndex = buf.position();
                     buf.putInt(0);
@@ -374,6 +377,7 @@ public abstract class BufferedContext {
             }
             buf.putInt(countIndex, spanCount);
             rq.ensureCapacity(4);
+            buf = rq.getBuffer();
             buf.putInt(END_SHAPE_CLIP);
         }
     }
@@ -381,14 +385,17 @@ public abstract class BufferedContext {
     private void resetComposite() {
         // assert rq.lock.isHeldByCurrentThread();
         rq.ensureCapacity(4);
+        RenderBuffer buf = rq.getBuffer();
         buf.putInt(RESET_COMPOSITE);
     }
 
     private void setComposite(Composite comp, int flags) {
         // assert rq.lock.isHeldByCurrentThread();
+
         if (comp instanceof AlphaComposite) {
             AlphaComposite ac = (AlphaComposite)comp;
             rq.ensureCapacity(16);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(SET_ALPHA_COMPOSITE);
             buf.putInt(ac.getRule());
             buf.putFloat(ac.getAlpha());
@@ -396,6 +403,7 @@ public abstract class BufferedContext {
         } else if (comp instanceof XORComposite) {
             int xorPixel = ((XORComposite)comp).getXorPixel();
             rq.ensureCapacity(8);
+          RenderBuffer buf = rq.getBuffer();
             buf.putInt(SET_XOR_COMPOSITE);
             buf.putInt(xorPixel);
         } else {
@@ -406,12 +414,14 @@ public abstract class BufferedContext {
     private void resetTransform() {
         // assert rq.lock.isHeldByCurrentThread();
         rq.ensureCapacity(4);
+      RenderBuffer buf = rq.getBuffer();
         buf.putInt(RESET_TRANSFORM);
     }
 
     private void setTransform(AffineTransform xform) {
         // assert rq.lock.isHeldByCurrentThread();
         rq.ensureCapacityAndAlignment(52, 4);
+      RenderBuffer buf = rq.getBuffer();
         buf.putInt(SET_TRANSFORM);
         buf.putDouble(xform.getScaleX());
         buf.putDouble(xform.getShearY());

@@ -77,8 +77,8 @@ final class OGLContext extends BufferedContext {
 
         // set the scratch context
         OGLRenderQueue rq = OGLRenderQueue.getInstance();
-        RenderBuffer buf = rq.getBuffer();
         rq.ensureCapacityAndAlignment(12, 4);
+      RenderBuffer buf = rq.getBuffer();
         buf.putInt(SET_SCRATCH_SURFACE);
         buf.putLong(pConfigInfo);
     }

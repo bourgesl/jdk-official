@@ -26,12 +26,18 @@
 package sun.java2d.opengl;
 
 import sun.awt.util.ThreadGroupUtils;
+import sun.java2d.pipe.DoubleBufferedRenderQueue;
 import sun.java2d.pipe.RenderBuffer;
 import sun.java2d.pipe.RenderQueue;
+import sun.java2d.pipe.RenderQueueImpl;
 
 import static sun.java2d.pipe.BufferedOpCodes.*;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.Collection;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * OGL-specific implementation of RenderQueue.  This class provides a
@@ -39,7 +45,7 @@ import java.security.PrivilegedAction;
  * the queue, thus ensuring that only one thread communicates with the native
  * OpenGL libraries for the entire process.
  */
-public class OGLRenderQueue extends RenderQueue {
+public class OGLRenderQueue extends DoubleBufferedRenderQueue {
 
     private static OGLRenderQueue theInstance;
     private final QueueFlusher flusher;
@@ -49,7 +55,7 @@ public class OGLRenderQueue extends RenderQueue {
          * The thread must be a member of a thread group
          * which will not get GCed before VM exit.
          */
-        flusher = AccessController.doPrivileged((PrivilegedAction<QueueFlusher>) QueueFlusher::new);
+      flusher = AccessController.doPrivileged((PrivilegedAction<QueueFlusher>) QueueFlusher::new);
     }
 
     /**
@@ -98,8 +104,8 @@ public class OGLRenderQueue extends RenderQueue {
             // GraphicsConfig current before disposing the native resources
             OGLContext.setScratchSurface(pConfigInfo);
 
-            RenderBuffer buf = rq.getBuffer();
             rq.ensureCapacityAndAlignment(12, 4);
+            RenderBuffer buf = rq.getBuffer();
             buf.putInt(DISPOSE_CONFIG);
             buf.putLong(pConfigInfo);
 
@@ -117,10 +123,25 @@ public class OGLRenderQueue extends RenderQueue {
         return (Thread.currentThread() == getInstance().flusher.thread);
     }
 
-    public void flushNow() {
+  @Override
+  public RenderQueue createRenderQueueImpl() {
+    return new RenderQueueImpl() {
+      @Override
+      public void flushNow(boolean sync) {
+        OGLRenderQueue.this.flushNow(sync);
+      }
+
+      @Override
+      public void flushAndInvokeNow(Runnable task) {
+        OGLRenderQueue.this.flushAndInvokeNow(task);
+      }
+    };
+  }
+
+  public void flushNow(boolean sync) {
         // assert lock.isHeldByCurrentThread();
         try {
-            flusher.flushNow();
+            flusher.flushNow(sync);
         } catch (Exception e) {
             System.err.println("exception in flushNow:");
             e.printStackTrace();
@@ -139,24 +160,17 @@ public class OGLRenderQueue extends RenderQueue {
 
     private native void flushBuffer(long buf, int limit);
 
-    private void flushBuffer() {
-        // assert lock.isHeldByCurrentThread();
-        int limit = buf.position();
-        if (limit > 0) {
-            // process the queue
-            flushBuffer(buf.getAddress(), limit);
-        }
-        // reset the buffer position
-        buf.clear();
-        // clear the set of references, since we no longer need them
-        refSet.clear();
-    }
-
     private class QueueFlusher implements Runnable {
         private boolean needsFlush;
+        private boolean sync;
         private Runnable task;
         private Error error;
         private final Thread thread;
+
+        private final ReentrantLock lock = new ReentrantLock();
+        private final Condition flushRequested = lock.newCondition();
+        private final Condition flushDone = lock.newCondition();
+       //  private final Condition condition = lock.newCondition();
 
         public QueueFlusher() {
             String name = "Java2D Queue Flusher";
@@ -167,42 +181,78 @@ public class OGLRenderQueue extends RenderQueue {
             thread.start();
         }
 
-        public synchronized void flushNow() {
-            // wake up the flusher
-            needsFlush = true;
-            notify();
+        public void flushNow(boolean sync) {
+         // sync = true;
 
-            // wait for flush to complete
-            while (needsFlush) {
+            lock.lock();
+            try {
+              // wake up the flusher
+              needsFlush = true;
+              this.sync = sync;
+
+         //     System.out.println("Queuing flush for: " + getBuffer().getAddress() +" pos: "+getBuffer().position());
+
+              flushRequested.signal();
+              //condition.signal();
+
+              // wait for flush to complete
+              while (needsFlush) {
                 try {
-                    wait();
+               //   System.out.println("Before await");
+                  flushDone.await();
+
+                 // System.out.println("Await returned " + needsFlush + " flush for: " + getBuffer().getAddress() +" pos: "+getBuffer().position());
+
+                  //  condition.await();
                 } catch (InterruptedException e) {
                 }
-            }
+              }
 
+            }finally {
+              lock.unlock();
+            }
             // re-throw any error that may have occurred during the flush
-            if (error != null) {
+         /*   if (error != null) {
                 throw error;
             }
+            */
         }
 
-        public synchronized void flushAndInvokeNow(Runnable task) {
+        public void flushAndInvokeNow(Runnable task) {
             this.task = task;
-            flushNow();
+            flushNow(true);
         }
 
-        public synchronized void run() {
-            boolean timedOut = false;
+        public void run() {
+            boolean rqLock = false;
+
             while (true) {
+              lock.lock();
                 while (!needsFlush) {
                     try {
-                        timedOut = false;
+                      rqLock = false;
                         /*
                          * Wait until we're woken up with a flushNow() call,
                          * or the timeout period elapses (so that we can
                          * flush the queue periodically).
                          */
-                        wait(100);
+                      boolean wait = true;
+                    /*  if( (rqLock = tryLock())) { //1, TimeUnit.MILLISECONDS
+                        if(getBuffer().position() == 0) {
+                          unlock();
+                          rqLock = false;
+                        } else {
+                          wait = false;
+                      //    System.out.println("no wait");
+                        }
+                      }*/
+
+                      if(wait) {
+                        flushRequested.await(250, TimeUnit.MILLISECONDS);
+                      }
+
+                    //  flushRequested.await();
+                     // condition.await(100, TimeUnit.MILLISECONDS);
                         /*
                          * We will automatically flush the queue if the
                          * following conditions apply:
@@ -211,9 +261,10 @@ public class OGLRenderQueue extends RenderQueue {
                          *   - there is something in the queue to flush
                          * Otherwise, just continue (we'll flush eventually).
                          */
-                        if (!needsFlush && (timedOut = tryLock())) {
-                            if (buf.position() > 0) {
+                        if (!needsFlush && (rqLock || (rqLock = tryLock()))) {
+                            if (getBuffer().position() > 0) {
                                 needsFlush = true;
+                                sync = false;
                             } else {
                                 unlock();
                             }
@@ -221,28 +272,73 @@ public class OGLRenderQueue extends RenderQueue {
                     } catch (InterruptedException e) {
                     }
                 }
+                boolean lockHeld = true;
                 try {
-                    // reset the throwable state
-                    error = null;
-                    // flush the buffer now
-                    flushBuffer();
-                    // if there's a task, invoke that now as well
-                    if (task != null) {
-                        task.run();
+                  {
+                    RenderBuffer buf = getBuffer();
+                    // assert lock.isHeldByCurrentThread();
+                    int bufferPosition = buf.position();
+                    long bufferAddress = buf.getAddress();
+                    // reset the buffer position
+                    buf.clear();
+
+                    // will go out of scope after native flushBuffer is done
+                    Collection<Object> refs = copyAndClearReferences();
+
+                    togglePipelines();
+
+                    if (!sync) {
+                      if(rqLock) {
+                       // System.out.println("async buffer swap");
+                        unlock();
+                        rqLock = false;
+                      } else {
+                        needsFlush = false;
+                        flushDone.signal();
+                        //condition.signal();
+                      }
+
+                        lock.unlock();
+                        lockHeld = false;
                     }
+
+                    if (bufferPosition > 0) {
+                      // process the queue
+                      //System.out.println("Flushing Buffer " + bufferAddress+" length: " + bufferPosition+" sync: "+sync);
+                      flushBuffer(bufferAddress, bufferPosition);
+                    }
+
+                    if (!sync) {
+                      if (task != null) {
+                        System.out.println("Task is null during async!");
+                      }
+                      // assert task == null;
+                    } else {
+                      // if there's a task, invoke that now as well
+                      if (task != null) {
+                        task.run();
+                      }
+                    }
+                  }
                 } catch (Error e) {
                     error = e;
                 } catch (Exception x) {
                     System.err.println("exception in QueueFlusher:");
                     x.printStackTrace();
                 } finally {
-                    if (timedOut) {
+                    if (rqLock) {
                         unlock();
                     }
+
                     task = null;
+
+                  if(lockHeld) {
                     // allow the waiting thread to continue
                     needsFlush = false;
-                    notify();
+                    flushDone.signal();
+                    //condition.signal();
+                    lock.unlock();
+                  }
                 }
             }
         }

@@ -102,9 +102,9 @@ public abstract class BufferedMaskFill extends MaskFill {
             if (totalBytesRequired <= buf.capacity()) {
                 if (totalBytesRequired > buf.remaining()) {
                     // process the queue first and then enqueue the mask
-                    rq.flushNow();
+                    rq.flushNow(false);
                 }
-
+                buf = rq.getBuffer();
                 buf.putInt(MASK_FILL);
                 // enqueue parameters
                 buf.putInt(x).putInt(y).putInt(w).putInt(h);

@@ -122,7 +122,7 @@ public abstract class BufferedMaskBlit extends MaskBlit {
         try {
             validateContext(dst, comp, clip);
 
-            RenderBuffer buf = rq.getBuffer();
+
             int totalBytesRequired = 20 + (width * height * 4);
 
             /*
@@ -132,6 +132,7 @@ public abstract class BufferedMaskBlit extends MaskBlit {
              *         than 32x32 pixels, so there's no urgency here...
              */
             rq.ensureCapacity(totalBytesRequired);
+            RenderBuffer buf = rq.getBuffer();
 
             // enqueue parameters and tile pixels
             int newpos = enqueueTile(buf.getAddress(), buf.position(),

@@ -237,8 +237,8 @@ final class OGLBlitLoops {
                                     double dx2, double dy2)
     {
         // assert rq.lock.isHeldByCurrentThread();
-        RenderBuffer buf = rq.getBuffer();
         rq.ensureCapacityAndAlignment(72, 24);
+      RenderBuffer buf = rq.getBuffer();
         buf.putInt(BLIT);
         buf.putInt(packedParams);
         buf.putInt(sx1).putInt(sy1);

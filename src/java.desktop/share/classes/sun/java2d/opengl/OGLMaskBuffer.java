@@ -1,3 +1,27 @@
+/*
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
+ * or visit www.oracle.com if you need additional information or have any
+ * questions.
+ */
 package sun.java2d.opengl;
 
 import sun.java2d.pipe.RenderBuffer;
@@ -5,12 +29,17 @@ import sun.java2d.pipe.RenderQueue;
 import sun.misc.Unsafe;
 
 import static sun.java2d.pipe.BufferedOpCodes.MASK_BUFFER_FENCE;
-import static sun.java2d.pipe.BufferedOpCodes.TURBO_MASK_FILL;
 
 public class OGLMaskBuffer {
-  public static final int MASK_BUFFER_REGION_COUNT = 4;
-  public static final int MASK_BUFFER_REGION_SIZE = 1024*1024;
+  public static final int MASK_BUFFER_REGION_COUNT = 4; // LBO: too low ?
+  public static final int MASK_BUFFER_REGION_SIZE = 4 * 1024*1024; // LBO: 4Mb seems faster
   public static final int MASK_BUFFER_SIZE = MASK_BUFFER_REGION_SIZE * MASK_BUFFER_REGION_COUNT;
+  
+  static {
+      System.out.println("MASK_BUFFER_REGION_COUNT: "+MASK_BUFFER_REGION_COUNT);
+      System.out.println("MASK_BUFFER_REGION_SIZE: "+MASK_BUFFER_REGION_SIZE);
+      System.out.println("MASK_BUFFER_SIZE: "+MASK_BUFFER_SIZE);
+  }
 
   /**
    * Vertex-Data per Mask-Quad: 1 Vertex = 8*sizeof(float) = 32 byte
@@ -83,6 +112,7 @@ public class OGLMaskBuffer {
       int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
 
       if (regionBefore != regionAfter) {
+          // System.out.println("need another buffer region: "+regionAfter);
         queue.ensureCapacity(12);
         RenderBuffer buffer = queue.getBuffer();
         buffer.putInt(MASK_BUFFER_FENCE);
@@ -106,7 +136,7 @@ public class OGLMaskBuffer {
 
         int fenceCounter = 0;
         while (nextRegionPending) {
-          //  System.out.println("We have a real problem!!");
+          // System.out.println("waiting for region (queue flush now) ...");
           queue.flushNow();
           synchronized (pendingFences) {
             nextRegionPending = pendingFences[regionAfter];

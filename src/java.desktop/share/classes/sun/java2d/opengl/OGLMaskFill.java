@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,8 @@
 
 package sun.java2d.opengl;
 
-import java.awt.*;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 
 import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
@@ -41,9 +42,17 @@ import sun.java2d.pipe.RenderBuffer;
 import static sun.java2d.loops.CompositeType.*;
 import static sun.java2d.loops.SurfaceType.*;
 import static sun.java2d.pipe.BufferedOpCodes.*;
+import sun.misc.Unsafe;
 
 class OGLMaskFill extends BufferedMaskFill {
 
+    private final static boolean USE_OPTIMIZE_FILL = true;
+    
+    static {
+        System.out.println("USE_OPTIMIZE_FILL: " + USE_OPTIMIZE_FILL);
+        System.out.println("Unsafe.ARRAY_BYTE_BASE_OFFSET: " + Unsafe.ARRAY_BYTE_BASE_OFFSET);
+    }
+    
     static void register() {
         GraphicsPrimitive[] primitives = {
             new OGLMaskFill(AnyColor,                  SrcOver),
@@ -87,66 +96,113 @@ class OGLMaskFill extends BufferedMaskFill {
                                    null, sg2d.paint, sg2d, ctxflags);
     }
 
-
-  /*@Override
-  public void MaskFill(SunGraphics2D sg2d, SurfaceData sData,
-                       Composite comp,
-                       final int x, final int y, final int w, final int h,
-                       final byte[] mask,
-                       final int maskoff, final int maskscan)
-  {
-    OGLMaskBuffer.getInstance();
-    super.MaskFill(sg2d, sData, comp, x, y, w, h, mask, maskoff, maskscan);
-  }*/
-
-
-  @Override
-  public void MaskFill(SunGraphics2D sg2d, SurfaceData sData,
-                       Composite comp,
-                       final int x, final int y, final int w, final int h,
-                       final byte[] mask,
-                       final int maskoff, final int maskscan)
-  {
-    AlphaComposite acomp = (AlphaComposite)comp;
-    if (acomp.getRule() != AlphaComposite.SRC_OVER) {
-      comp = AlphaComposite.SrcOver;
-    }
-
-    rq.lock();
-    try {
-      validateContext(sg2d, comp, BufferedContext.USE_MASK);
-
-      rq.ensureCapacity(24);
-      RenderBuffer buf = rq.getBuffer();
-
-      OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
-
-      int maskOffset = Integer.MAX_VALUE;
-      if(mask != null) {
-        maskOffset = maskBuffer.allocateMaskData(rq, w*h);
-
-        // Just to illustrate how to write to VRAM
-        long maskBuffPtr = maskBuffer.getMaskBufferBasePtr() + maskOffset;
-        for (int i = 0; i < h; i++) {
-          for (int m = 0; m < w; m++) {
-            byte source = mask[maskoff + maskscan * i + m];
-            //System.out.println(source);
-            if(source != 0) {
-              OGLMaskBuffer.UNSAFE.putByte(maskBuffPtr, source);
-            }
-            maskBuffPtr++;
-          }
+    @Override
+    public void MaskFill(SunGraphics2D sg2d, SurfaceData sData,
+                         Composite comp,
+                         final int x, final int y, final int w, final int h,
+                         final byte[] mask,
+                         final int maskoff, final int maskscan)
+    {
+        AlphaComposite acomp = (AlphaComposite) comp;
+        if (acomp.getRule() != AlphaComposite.SRC_OVER) {
+            comp = AlphaComposite.SrcOver;
         }
-      }
 
-      buf = rq.getBuffer();
-      buf.putInt(TURBO_MASK_FILL);
-      // enqueue parameters
-      buf.putInt(x).putInt(y).putInt(w).putInt(h);
-      buf.putInt(maskOffset);
+        rq.lock();
+        try {
+            validateContext(sg2d, comp, BufferedContext.USE_MASK);
 
-    } finally {
-      rq.unlock();
+            rq.ensureCapacity(24);
+            final RenderBuffer buf = rq.getBuffer();
+
+            final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
+
+            int maskOffset = Integer.MAX_VALUE;
+            if (mask != null) {
+                final int len = w * h;
+                maskOffset = maskBuffer.allocateMaskData(rq, len);
+
+                // directly write to VRAM
+                long maskBuffPtr = maskBuffer.getMaskBufferBasePtr() + maskOffset;
+
+                final Unsafe UNSAFE = OGLMaskBuffer.UNSAFE;
+                final byte ZERO = 0;
+
+                if (!USE_OPTIMIZE_FILL) {
+                    // Just to illustrate how to write to VRAM
+                    for (int i = 0; i < h; i++) {
+                        for (int m = 0; m < w; m++) {
+                            byte source = mask[maskoff + maskscan * i + m];
+                            //System.out.println(source);
+                            if (source != ZERO) {
+                                UNSAFE.putByte(maskBuffPtr, source);
+                            }
+                            maskBuffPtr++;
+                        }
+                    }
+                } else {
+                    // TODO: LBO ensure correct alignment (byte / long / int addresses for non-x86 platforms */
+                    
+                    // should be 8-bytes aligned (maskoff = 0) ?
+                    final long off = Unsafe.ARRAY_BYTE_BASE_OFFSET + maskoff;
+                    
+                    if (maskscan == w) {
+                        // no-padding, make single copy ie use 1D loop:
+                        final int l = len;
+                        final int rem = (l % 8);
+                        final int l8 = l - rem;
+                        int j = 0;
+
+                        if (l8 != 0) {
+                            for (j = 0; j < l8; j += 8) {
+                                UNSAFE.putLong(maskBuffPtr, UNSAFE.getLong(mask, off + j));
+                                maskBuffPtr += 8L;
+                            }
+                        }
+                        // Use then integer (4 bytes) ?
+                        // Remaining bytes:
+                        for (; j < l; j++) {
+                            final byte source = UNSAFE.getByte(mask, off + j);
+                            if (source != ZERO) {
+                                UNSAFE.putByte(maskBuffPtr, source);
+                            }
+                            maskBuffPtr++;
+                        }
+                    } else {
+                        for (int i = 0; i < h; i++) {
+                            final long offRow = off + maskscan * i;
+
+                            final int rem = (w % 8);
+                            final int w8 = w - rem;
+                            int j = 0;
+
+                            if (w8 != 0) {
+                                for (j = 0; j < w8; j += 8) {
+                                    UNSAFE.putLong(maskBuffPtr, UNSAFE.getLong(mask, offRow + j));
+                                    maskBuffPtr += 8L;
+                                }
+                            }
+                            // Use then integer (4 bytes) ?
+                            // Remaining bytes:
+                            for (; j < w; j++) {
+                                final byte source = UNSAFE.getByte(mask, offRow + j);
+                                if (source != ZERO) {
+                                    UNSAFE.putByte(maskBuffPtr, source);
+                                }
+                                maskBuffPtr++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            buf.putInt(TURBO_MASK_FILL);
+            // enqueue parameters
+            buf.putInt(x).putInt(y).putInt(w).putInt(h);
+            buf.putInt(maskOffset);
+
+        } finally {
+            rq.unlock();
+        }
     }
-  }
 }

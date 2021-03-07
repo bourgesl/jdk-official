@@ -45,6 +45,12 @@ public final class AAShapePipe
     implements ShapeDrawPipe, ParallelogramPipe
 {
     static final RenderingEngine RDR_ENGINE = RenderingEngine.getInstance();
+    
+    static final boolean TILE_PADDING = false; // false to disable tile padding (faster)
+    
+    static {
+        System.out.println("AAShapePipe: TILE_PADDING = " + TILE_PADDING);
+    }
 
     // Per-thread TileState (~1K very small so do not use any Weak Reference)
     private static final ReentrantContextProvider<TileState> TILE_STATE_PROVIDER =
@@ -182,10 +188,12 @@ public final class AAShapePipe
 
                 for (int x = x0; x < x1; x += tw) {
                     final int w = Math.min(tw, x1 - x);
+                    // LBO: use w instead of tw to avoid row padding:
+                    final int maskscan = (TILE_PADDING) ? tw : w;
 
                     final int a = aatg.getTypicalAlpha();
 
-                    if (a == 0x00 || !outpipe.needTile(context, x, y, w, h)) {
+                    if ((a == 0x00) || !outpipe.needTile(context, x, y, w, h)) {
                         aatg.nextTile();
                         outpipe.skipTile(context, x, y);
                         continue;
@@ -195,10 +203,10 @@ public final class AAShapePipe
                         aatg.nextTile();
                     } else {
                         atile = alpha;
-                        aatg.getAlpha(alpha, 0, tw);
+                        aatg.getAlpha(alpha, 0, maskscan);
                     }
 
-                    outpipe.renderPathTile(context, atile, 0, tw, x, y, w, h);
+                    outpipe.renderPathTile(context, atile, 0, maskscan, x, y, w, h);
                 }
             }
         } finally {

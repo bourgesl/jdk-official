@@ -31,171 +31,142 @@ import sun.misc.Unsafe;
 import static sun.java2d.pipe.BufferedOpCodes.MASK_BUFFER_FENCE;
 
 public class OGLMaskBuffer {
-  public static final int MASK_BUFFER_REGION_COUNT = 4; // LBO: too low ?
-  public static final int MASK_BUFFER_REGION_SIZE = 4 * 1024*1024; // LBO: 4Mb seems faster
-  public static final int MASK_BUFFER_SIZE = MASK_BUFFER_REGION_SIZE * MASK_BUFFER_REGION_COUNT;
-  
-  static {
-      System.out.println("MASK_BUFFER_REGION_COUNT: "+MASK_BUFFER_REGION_COUNT);
-      System.out.println("MASK_BUFFER_REGION_SIZE: "+MASK_BUFFER_REGION_SIZE);
-      System.out.println("MASK_BUFFER_SIZE: "+MASK_BUFFER_SIZE);
-  }
 
-  /**
-   * Vertex-Data per Mask-Quad: 1 Vertex = 8*sizeof(float) = 32 byte
-   * Per Quad: 32x4 = 128 byte
-   * -> Size Vertex Buffers, so that Masks with 512 byte on average fit the vtx buffer
-   */
-  public static final int VERTEX_BUFFER_SIZE = MASK_BUFFER_SIZE / 4;
+    public static final int MASK_BUFFER_REGION_COUNT = 4; // LBO: too low ?
+    public static final int MASK_BUFFER_REGION_SIZE = 4 * 1024 * 1024; // LBO: 4Mb seems faster
+    public static final int MASK_BUFFER_SIZE = MASK_BUFFER_REGION_SIZE * MASK_BUFFER_REGION_COUNT;
 
-  long maskBufferBasePtr;
-  long vertexBufferBasePtr;
+    static {
+        System.out.println("MASK_BUFFER_REGION_COUNT: " + MASK_BUFFER_REGION_COUNT);
+        System.out.println("MASK_BUFFER_REGION_SIZE: " + MASK_BUFFER_REGION_SIZE);
+        System.out.println("MASK_BUFFER_SIZE: " + MASK_BUFFER_SIZE);
+    }
 
-  long tileDataOffset = VERTEX_BUFFER_SIZE/2;
+    /**
+     * Vertex-Data per Mask-Quad: 1 Vertex = 8*sizeof(float) = 32 byte
+     * Per Quad: 32x4 = 128 byte
+     * -> Size Vertex Buffers, so that Masks with 512 byte on average fit the vtx buffer
+     */
+    public static final int VERTEX_BUFFER_SIZE = MASK_BUFFER_SIZE / 4;
 
-  int currentBufferOffset;
+    long maskBufferBasePtr;
+    long vertexBufferBasePtr;
 
-  int currentVtxPos;
-  int lastVtxPos;
+    long tileDataOffset = VERTEX_BUFFER_SIZE / 2;
 
-  private volatile static OGLMaskBuffer buffer;
+    int currentBufferOffset;
 
-  public static final Unsafe UNSAFE;
+    int currentVtxPos;
+    int lastVtxPos;
 
-  private static int BUFFER_ARRAY_STRIDE = 1;
+    private volatile static OGLMaskBuffer buffer;
 
-  private final static boolean pendingFences[] = new boolean[MASK_BUFFER_REGION_COUNT];
+    public static final Unsafe UNSAFE;
 
-  static {
-    UNSAFE = Unsafe.getUnsafe();
-  }
+    private static int BUFFER_ARRAY_STRIDE = 1;
 
-  public static OGLMaskBuffer getInstance() {
-    if(buffer == null) {
-      synchronized(OGLMaskBuffer.class) {
-        if(buffer == null) {
-          OGLRenderQueue.getInstance().flushAndInvokeNow(new Runnable() {
-            @Override
-            public void run() {
-              buffer = new OGLMaskBuffer();
+    private final static boolean pendingFences[] = new boolean[MASK_BUFFER_REGION_COUNT];
+
+    static {
+        UNSAFE = Unsafe.getUnsafe();
+    }
+
+    public static OGLMaskBuffer getInstance() {
+        if (buffer == null) {
+            synchronized (OGLMaskBuffer.class) {
+                if (buffer == null) {
+                    OGLRenderQueue.getInstance().flushAndInvokeNow(new Runnable() {
+                        @Override
+                        public void run() {
+                            buffer = new OGLMaskBuffer();
+                        }
+                    });
+                }
             }
-          });
         }
-      }
+
+        return buffer;
     }
 
-    return buffer;
-  }
+    public OGLMaskBuffer() {
+        vertexBufferBasePtr = allocateVertexBufferPtr(VERTEX_BUFFER_SIZE);
+        maskBufferBasePtr = allocateMaskBufferPtr(MASK_BUFFER_SIZE, MASK_BUFFER_REGION_SIZE);
 
-  public OGLMaskBuffer() {
-    vertexBufferBasePtr = allocateVertexBufferPtr(VERTEX_BUFFER_SIZE);
-    maskBufferBasePtr = allocateMaskBufferPtr(MASK_BUFFER_SIZE, MASK_BUFFER_REGION_SIZE);
+        currentVtxPos = 0;
+        lastVtxPos = 0;
+        currentBufferOffset = 0;
+    }
 
-    currentVtxPos = 0;
-    lastVtxPos = 0;
-    currentBufferOffset = 0;
-  }
+    public final int allocateMaskData(final RenderQueue queue, final int maskSize) {
+        int offsetBefore = currentBufferOffset;
+        final int regionBefore = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
 
-  public final int allocateMaskData(RenderQueue queue, int maskSize) {
-    int offsetBefore = currentBufferOffset;
+        if (currentBufferOffset + maskSize >= MASK_BUFFER_SIZE) {
+            offsetBefore = currentBufferOffset = 0;
+        }
+        currentBufferOffset += maskSize;
+        int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
 
-      //int maskSize = w * h;
+        if (regionBefore != regionAfter) {
+            // System.out.println("need another buffer region: " + regionAfter);
 
-      int regionBefore = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
+            queue.ensureCapacity(12);
 
-      if (currentBufferOffset + maskSize >= MASK_BUFFER_SIZE) {
-        offsetBefore = currentBufferOffset = 0;
-      }
-      long maskBuffPtr = maskBufferBasePtr + currentBufferOffset;
+            final RenderBuffer buffer = queue.getBuffer();
+            buffer.putInt(MASK_BUFFER_FENCE);
+            buffer.putInt(regionBefore);
 
-      currentBufferOffset += maskSize;
-      int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
+            int waitRegion;
+            boolean nextRegionPending;
 
-      if (regionBefore != regionAfter) {
-          // System.out.println("need another buffer region: "+regionAfter);
-        queue.ensureCapacity(12);
-        RenderBuffer buffer = queue.getBuffer();
-        buffer.putInt(MASK_BUFFER_FENCE);
-        buffer.putInt(regionBefore);
+            synchronized (pendingFences) {
+                // why + 2 clemens ?
+                waitRegion = (regionBefore + 1) % MASK_BUFFER_REGION_COUNT;
+//                waitRegion = regionAfter;
+                if (!pendingFences[waitRegion]) {
+                    waitRegion = -1;
+                }
+                buffer.putInt(waitRegion);
 
-        boolean nextRegionPending;
+                // enable in case async flush is available
+                //queue.flushNow(false);
+                pendingFences[regionBefore] = true;
+
+                nextRegionPending = pendingFences[regionAfter];
+            }
+
+            int fenceCounter = 0;
+            while (nextRegionPending) {
+                // System.out.println("waiting for region (queue flush now) ...");
+                queue.flushNow();
+
+                synchronized (pendingFences) {
+                    nextRegionPending = pendingFences[regionAfter];
+                }
+
+                if (fenceCounter > 0) {
+                    System.out.println(fenceCounter);
+                }
+
+                fenceCounter++;
+            }
+        }
+
+        return offsetBefore;
+    }
+
+    public final long getMaskBufferBasePtr() {
+        return maskBufferBasePtr;
+    }
+
+    private static void setFenceAvailable(int fenceNum) {
         synchronized (pendingFences) {
-          int waitRegion = (regionBefore + 2) % MASK_BUFFER_REGION_COUNT;
-          if (!pendingFences[waitRegion]) {
-            waitRegion = -1;
-          }
-          buffer.putInt(waitRegion);
-
-          // enable in case async flush is available
-          //queue.flushNow(false);
-
-          pendingFences[regionBefore] = true;
-
-          nextRegionPending = pendingFences[regionAfter];
+            // System.out.println("Fence available: " + fenceNum);
+            pendingFences[fenceNum] = false;
         }
-
-        int fenceCounter = 0;
-        while (nextRegionPending) {
-          // System.out.println("waiting for region (queue flush now) ...");
-          queue.flushNow();
-          synchronized (pendingFences) {
-            nextRegionPending = pendingFences[regionAfter];
-          }
-
-          if (fenceCounter > 0) {
-            System.out.println(fenceCounter);
-          }
-
-          fenceCounter++;
-        }
-      }
-
-    return offsetBefore;
-  }
-
-  public final long getMaskBufferBasePtr() {
-    return maskBufferBasePtr;
-  }
-
-  private static void setFenceAvailable(int fenceNum) {
-    synchronized (pendingFences) {
-     // System.out.println("Fence available: " + fenceNum);
-      pendingFences[fenceNum] = false;
     }
-  }
 
-  private static native long allocateMaskBufferPtr(int size, int regionSize);
+    private static native long allocateMaskBufferPtr(int size, int regionSize);
 
-  private static native long allocateVertexBufferPtr(int size);
+    private static native long allocateVertexBufferPtr(int size);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

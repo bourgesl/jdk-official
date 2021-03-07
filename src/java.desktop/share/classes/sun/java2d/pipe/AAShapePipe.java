@@ -33,6 +33,7 @@ import sun.java2d.ReentrantContext;
 import sun.java2d.ReentrantContextProvider;
 import sun.java2d.ReentrantContextProviderTL;
 import sun.java2d.SunGraphics2D;
+import sun.java2d.opengl.OGLMaskFill;
 
 /**
  * This class is used to convert raw geometry into 8-bit alpha tiles
@@ -169,7 +170,9 @@ public final class AAShapePipe
             context = outpipe.startSequence(sg, s,
                                             ts.computeDevBox(abox),
                                             abox);
-
+            
+            final boolean useDirect = (sg.alphafill instanceof OGLMaskFill); // weak test (Quick and dirty)
+            
             // copy of int[] abox as local variables for performance:
             final int x0 = abox[0];
             final int y0 = abox[1];
@@ -203,7 +206,12 @@ public final class AAShapePipe
                         aatg.nextTile();
                     } else {
                         atile = alpha;
-                        aatg.getAlpha(alpha, 0, maskscan);
+                        
+                        if (useDirect) {
+                            aatg.getAlphaDirect(atile);
+                        } else {
+                            aatg.getAlpha(alpha, 0, maskscan);
+                        }
                     }
 
                     outpipe.renderPathTile(context, atile, 0, maskscan, x, y, w, h);

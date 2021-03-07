@@ -28,6 +28,9 @@ package sun.java2d.marlin;
 import java.util.Arrays;
 import sun.java2d.pipe.AATileGenerator;
 import jdk.internal.misc.Unsafe;
+import sun.java2d.opengl.OGLMaskBuffer;
+import sun.java2d.opengl.OGLMaskFill;
+import sun.java2d.opengl.OGLRenderQueue;
 
 final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
 
@@ -194,6 +197,188 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
         }
     }
 
+    /**
+     * Gets the alpha coverage values for the current tile.
+     * Either this method, or the nextTile() method should be called
+     * once per tile, but not both.
+     */
+    @Override
+    public void getAlphaDirect(byte[] tile) {
+        final OGLRenderQueue rq = OGLRenderQueue.getInstance();
+
+        rq.lock();
+        try {
+            if (false) {
+                System.out.println("Not implemented.");
+            } else {
+                // should validate before ?
+                // validateContext(sg2d, comp, BufferedContext.USE_MASK);
+                
+                OGLMaskFill.USE_DIRECT_TILE = true; // flag
+                
+                final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
+                
+                if (cache.useRLE) {
+                    System.out.println("Not implemented.");
+                    // getAlphaRLE(tile, maskBuffer);
+                } else {
+                    getAlphaNoRLE(tile, rq, maskBuffer);
+                }                
+            }
+        } finally {
+            rq.unlock();
+        }        
+    }
+
+    private final static boolean SKIP_CLEAR_DIRECT = false; // false needed until OGL buffer clear is really working !
+    private final static boolean CHECK_CLEAR_DIRECT = false;
+    
+    static {
+        System.out.println("SKIP_CLEAR_DIRECT: " + SKIP_CLEAR_DIRECT);
+    }
+    
+    /**
+     * Gets the alpha coverage values for the current tile.
+     * Either this method, or the nextTile() method should be called
+     * once per tile, but not both.
+     */
+    private void getAlphaNoRLE(final byte[] tile,
+                               final OGLRenderQueue rq, 
+                               final OGLMaskBuffer maskBuffer)
+    {
+        if (DO_MONITORS) {
+            rdrStats.mon_ptg_getAlpha.start();
+        }
+
+        // local vars for performance:
+        final MarlinCache _cache = this.cache;
+        final long[] rowAAChunkIndex = _cache.rowAAChunkIndex;
+        final int[] rowAAx0 = _cache.rowAAx0;
+        final int[] rowAAx1 = _cache.rowAAx1;
+
+        final int x0 = this.x;
+        final int x1 = FloatMath.min(x0 + TILE_W, _cache.bboxX1);
+
+        // note: process tile line [0 - 32[
+        final int y0 = 0;
+        final int y1 = FloatMath.min(this.y + TILE_H, _cache.bboxY1) - this.y;
+
+        if (DO_LOG_BOUNDS) {
+            MarlinUtils.logInfo("getAlpha = [" + x0 + " ... " + x1
+                                + "[ [" + y0 + " ... " + y1 + "[");
+        }
+        
+        final int w = x1 - x0;
+        final int h = y1 - y0;
+
+        // directly write to VRAM
+        final int maskOffset = maskBuffer.allocateMaskData(rq, w * h); // no padding
+        
+        // System.out.println("write mask at [" + maskOffset + "] (" + w + " x " + h + ")");
+        
+        // store mask offset in tile[]:
+        final Unsafe _unsafe = OffHeapArray.UNSAFE;
+        _unsafe.putInt(tile, Unsafe.ARRAY_BYTE_BASE_OFFSET, maskOffset);
+        
+        long maskBuffPtr = maskBuffer.getMaskBufferBasePtr() + maskOffset;
+        final byte ZERO = 0;
+
+        final long SIZE = 1L;
+        final long addr_rowAA = _cache.rowAAChunk.address;
+        long addr;
+
+        // final int skipRowPixels = 0; // no-padding
+
+        int aax0, aax1, end;
+        byte mask;
+
+        for (int cy = y0, cx; cy < y1; cy++) {
+            // empty line (default)
+            cx = x0;
+
+            aax1 = rowAAx1[cy]; // exclusive
+
+            // quick check if there is AA data
+            // corresponding to this tile [x0; x1[
+            if (aax1 > x0) {
+                aax0 = rowAAx0[cy]; // inclusive
+
+                if (aax0 < x1) {
+                    // note: cx is the cursor pointer in the tile array
+                    // (left to right)
+                    cx = aax0;
+
+                    // ensure cx >= x0
+                    if (cx <= x0) {
+                        cx = x0;
+                    } else {
+                        if (SKIP_CLEAR_DIRECT) {
+                            // LBO: tile is already (0) filled:
+                            maskBuffPtr += (x0 - cx);
+                        } else {
+                            // fill line start until first AA pixel rowAA exclusive:
+                            for (end = x0; end < cx; end++) {
+                                _unsafe.putByte(maskBuffPtr, ZERO);
+                                maskBuffPtr += SIZE;
+                            }
+                        }
+                    }
+
+                    // now: cx >= x0 and cx >= aax0
+
+                    // Copy AA data (sum alpha data):
+                    addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
+
+                    for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                        // cx inside tile[x0; x1[ :
+                        // tile[idx++] = _unsafe.getByte(addr); // [0-255]
+                        mask = _unsafe.getByte(addr); // [0-255]
+                        addr += SIZE;
+
+                        if (!SKIP_CLEAR_DIRECT || (mask != ZERO)) {
+                            if (CHECK_CLEAR_DIRECT && _unsafe.getByte(maskBuffPtr) != 0) {
+                                System.out.println("mask is not 0 !");
+                            }
+                            
+                            _unsafe.putByte(maskBuffPtr, mask);
+                        }
+                        maskBuffPtr += SIZE;
+                    }
+                }
+            }
+
+            if (SKIP_CLEAR_DIRECT) {
+                // LBO: tile is already (0) filled:                        
+                maskBuffPtr += (x1 - cx);
+            } else {
+                // fill line end
+                while (cx < x1) {
+                    _unsafe.putByte(maskBuffPtr, ZERO);
+                    maskBuffPtr += SIZE;
+                    cx++;
+                }
+            }
+/*
+            if (DO_TRACE) {
+                for (int i = idx - (x1 - x0); i < idx; i++) {
+                    System.out.print(hex(tile[i], 2));
+                }
+                System.out.println();
+            }
+*/
+//            idx += skipRowPixels;
+        }
+
+        nextTile();
+
+        if (DO_MONITORS) {
+            rdrStats.mon_ptg_getAlpha.stop();
+        }
+    }    
+    
+    
+// --- former byte[] tile loops:    
+    
     /**
      * Gets the alpha coverage values for the current tile.
      * Either this method, or the nextTile() method should be called

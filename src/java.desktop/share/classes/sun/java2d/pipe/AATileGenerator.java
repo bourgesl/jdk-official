@@ -104,6 +104,13 @@ public interface AATileGenerator {
     public void getAlpha(byte[] tile, int offset, int rowstride);
 
     /**
+     * Gets the alpha coverage values for the current tile.
+     * Either this method, or the nextTile() method should be called
+     * once per tile, but not both.
+     */
+    public void getAlphaDirect(byte[] tile);
+    
+    /**
      * Disposes this tile generator.
      * No further calls will be made on this instance.
      */

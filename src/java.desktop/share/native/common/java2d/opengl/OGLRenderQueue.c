@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -353,7 +353,7 @@ Java_sun_java2d_opengl_OGLRenderQueue_flushBuffer
                 jint w        = NEXT_INT(b);
                 jint h        = NEXT_INT(b);
                 jint maskOffset      = NEXT_INT(b);
-                
+
                 OGLMaskFill_TurboMaskFill(oglc, x, y, w, h, maskOffset);
             }
             break;
@@ -361,11 +361,11 @@ Java_sun_java2d_opengl_OGLRenderQueue_flushBuffer
             {
                 jint fenceRegion = NEXT_INT(b);
                 jint waitRegion = NEXT_INT(b);
-                
+
                 OGLMaskBuffer_QueueMaskBufferFence(env, oglc, fenceRegion, waitRegion);
             }
             break;
-            
+
         case sun_java2d_pipe_BufferedOpCodes_MASK_BLIT:
             {
                 jint dstx     = NEXT_INT(b);

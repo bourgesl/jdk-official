@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -96,8 +96,8 @@
  */
 #define OGL_STATE_PGRAM_OP -5
 
-/* TODO: Write Documentation 
- * 
+/* TODO: Write Documentation
+ *
  */
 #define OGL_STATE_MASKBUF_OP -6
 

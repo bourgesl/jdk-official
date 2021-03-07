@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -317,8 +317,8 @@ typedef void (GLAPIENTRY *glTextureBarrierNVType) (void);
     OGL_##action##_FUNC(glVertex2i); \
     OGL_##action##_FUNC(glVertexPointer); \
     OGL_##action##_FUNC(glViewport); \
-    OGL_##action##_FUNC(glGetFloatv); 
-    
+    OGL_##action##_FUNC(glGetFloatv);
+
 
 #define OGL_EXPRESS_EXT_FUNCS(action) \
     OGL_##action##_EXT_FUNC(glActiveTextureARB); \

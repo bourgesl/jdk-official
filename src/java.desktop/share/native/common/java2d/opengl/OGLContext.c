@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -102,7 +102,7 @@ OGLContext_SetViewport(OGLSDOps *srcOps, OGLSDOps *dstOps)
     j2d_glMatrixMode(GL_PROJECTION);
     j2d_glLoadIdentity();
     j2d_glOrtho(0.0, (GLdouble)width, (GLdouble)height, 0.0, -1.0, 1.0);
-    
+
     j2d_glGetFloatv(GL_PROJECTION_MATRIX, ortho);
     orthoPtr = ortho;
 
@@ -973,7 +973,7 @@ OGLContext_CreateFragmentProgram(const char *fragmentShaderSource) {
 GLint OGLContext_compileShader(GLint type, const char *shaderSource, GLhandleARB* shader) {
     GLint success;
     int infoLogLength = 0;
-     
+
     // create the shader object and compile the shader source code
     *shader = j2d_glCreateShaderObjectARB(type);
     j2d_glShaderSourceARB(*shader, 1, &shaderSource, NULL);
@@ -992,7 +992,7 @@ GLint OGLContext_compileShader(GLint type, const char *shaderSource, GLhandleARB
         J2dRlsTraceLn2(J2D_TRACE_WARNING,
             "OGLContext_CreateFragmentProgram: compiler msg (%d):\n%s",
                        infoLogLength, infoLog);
-                       
+
                        printf("%s", infoLog);
     }
 
@@ -1002,7 +1002,7 @@ GLint OGLContext_compileShader(GLint type, const char *shaderSource, GLhandleARB
         j2d_glDeleteObjectARB(*shader);
         return 0;
     }
-    
+
     return success;
 }
 
@@ -1024,14 +1024,14 @@ OGLContext_CreateProgram(const char *vertexShaderSource, const char *fragmentSha
 
     // create the program object and attach it to the shader
     program = j2d_glCreateProgramObjectARB();
-    
+
     if(!OGLContext_compileShader(GL_FRAGMENT_SHADER_ARB, fragmentShaderSource, &fragmentShader)) {
         return 0;
     }
     j2d_glAttachObjectARB(program, fragmentShader);
     j2d_glDeleteObjectARB(fragmentShader);
-        
-    
+
+
     if(vertexShaderSource != NULL) {
         if(!OGLContext_compileShader(GL_VERTEX_SHADER_ARB, vertexShaderSource, &vertexShader)) {
             return 0;

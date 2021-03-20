@@ -192,7 +192,8 @@ public final class AAShapePipe
                 for (int x = x0; x < x1; x += tw) {
                     final int w = Math.min(tw, x1 - x);
                     // LBO: use w instead of tw to avoid row padding:
-                    final int maskscan = (TILE_PADDING) ? tw : w;
+                    final int maskscan = (useDirect) ? OGLMaskFill.MASK_SCAN_FOR_DIRECT_TILE: 
+                                            ((TILE_PADDING) ? tw : w);
 
                     final int a = aatg.getTypicalAlpha();
 

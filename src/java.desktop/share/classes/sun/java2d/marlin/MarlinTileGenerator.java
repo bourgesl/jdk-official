@@ -29,7 +29,6 @@ import java.util.Arrays;
 import sun.java2d.pipe.AATileGenerator;
 import jdk.internal.misc.Unsafe;
 import sun.java2d.opengl.OGLMaskBuffer;
-import sun.java2d.opengl.OGLMaskFill;
 import sun.java2d.opengl.OGLRenderQueue;
 
 final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
@@ -213,37 +212,39 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
             } else {
                 // should validate before ?
                 // validateContext(sg2d, comp, BufferedContext.USE_MASK);
-                
-                OGLMaskFill.USE_DIRECT_TILE = true; // flag
-                
+
                 final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
-                
+
                 if (cache.useRLE) {
-                    System.out.println("Not implemented.");
-                    // getAlphaRLE(tile, maskBuffer);
+                    getAlphaRLE(tile, rq, maskBuffer);
                 } else {
                     getAlphaNoRLE(tile, rq, maskBuffer);
-                }                
+                }
             }
         } finally {
             rq.unlock();
-        }        
+        }
     }
 
-    private final static boolean SKIP_CLEAR_DIRECT = false; // false needed until OGL buffer clear is really working !
-    private final static boolean CHECK_CLEAR_DIRECT = false;
-    
+    private final static boolean SKIP_CLEAR_DIRECT = true; // slightly better (true)
+    private final static boolean COPY_8 = true; // ??
+    private final static boolean COPY_4 = true; // ??
+    private final static boolean TEST_ZERO = true; // ??
+
     static {
         System.out.println("SKIP_CLEAR_DIRECT: " + SKIP_CLEAR_DIRECT);
+        System.out.println("COPY_8:            " + COPY_8);
+        System.out.println("COPY_4:            " + COPY_4);
+        System.out.println("TEST_ZERO:         " + TEST_ZERO);
     }
-    
+
     /**
      * Gets the alpha coverage values for the current tile.
      * Either this method, or the nextTile() method should be called
      * once per tile, but not both.
      */
     private void getAlphaNoRLE(final byte[] tile,
-                               final OGLRenderQueue rq, 
+                               final OGLRenderQueue rq,
                                final OGLMaskBuffer maskBuffer)
     {
         if (DO_MONITORS) {
@@ -267,27 +268,27 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
             MarlinUtils.logInfo("getAlpha = [" + x0 + " ... " + x1
                                 + "[ [" + y0 + " ... " + y1 + "[");
         }
-        
+
         final int w = x1 - x0;
         final int h = y1 - y0;
 
         // directly write to VRAM
         final int maskOffset = maskBuffer.allocateMaskData(rq, w * h); // no padding
-        
+
         // System.out.println("write mask at [" + maskOffset + "] (" + w + " x " + h + ")");
-        
+
+        final byte ZERO = 0;
+        final long SIZE = 1L;
+        final long SIZE4 = 4L;
+        final long SIZE8 = 8L;
+        final long addr_rowAA = _cache.rowAAChunk.address;
+
         // store mask offset in tile[]:
         final Unsafe _unsafe = OffHeapArray.UNSAFE;
         _unsafe.putInt(tile, Unsafe.ARRAY_BYTE_BASE_OFFSET, maskOffset);
-        
+
         long maskBuffPtr = maskBuffer.getMaskBufferBasePtr() + maskOffset;
-        final byte ZERO = 0;
-
-        final long SIZE = 1L;
-        final long addr_rowAA = _cache.rowAAChunk.address;
         long addr;
-
-        // final int skipRowPixels = 0; // no-padding
 
         int aax0, aax1, end;
         byte mask;
@@ -314,7 +315,7 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                     } else {
                         if (SKIP_CLEAR_DIRECT) {
                             // LBO: tile is already (0) filled:
-                            maskBuffPtr += (x0 - cx);
+                            maskBuffPtr += (cx - x0);
                         } else {
                             // fill line start until first AA pixel rowAA exclusive:
                             for (end = x0; end < cx; end++) {
@@ -329,26 +330,58 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                     // Copy AA data (sum alpha data):
                     addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
 
-                    for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                    end = (aax1 <= x1) ? aax1 : x1;
+
+                    if (COPY_8 || COPY_4) {
+                        // System.out.println("copy len: " + (end - cx));
+
+                        // Unaligned only supported by x86-64:
+                        if (COPY_8 && (end - cx) > 8) {
+                            cx += 8; // forward
+                            for (; cx < end; cx += 8) {
+                                // cx inside tile[x0; x1[ :
+                                // tile[idx++] = _unsafe.getByte(addr); // [0-255]
+                                _unsafe.putLong(maskBuffPtr, _unsafe.getLong(addr)); // same alignment: certainly not ?
+
+                                maskBuffPtr += SIZE8;
+                                addr += SIZE8;
+                            }
+                            cx -= 8; // backward
+                        }
+                        if (COPY_4 && (end - cx) > 4) {
+                            cx += 4; // forward
+                            for (; cx < end; cx += 4) {
+                                // cx inside tile[x0; x1[ :
+                                // tile[idx++] = _unsafe.getByte(addr); // [0-255]
+                                _unsafe.putInt(maskBuffPtr, _unsafe.getInt(addr)); // same alignment: certainly not ?
+
+                                maskBuffPtr += SIZE4;
+                                addr += SIZE4;
+                            }
+                            cx -= 4; // backward
+                        }
+                    }
+
+                    for (; cx < end; cx++) {
                         // cx inside tile[x0; x1[ :
                         // tile[idx++] = _unsafe.getByte(addr); // [0-255]
                         mask = _unsafe.getByte(addr); // [0-255]
-                        addr += SIZE;
 
-                        if (!SKIP_CLEAR_DIRECT || (mask != ZERO)) {
-                            if (CHECK_CLEAR_DIRECT && _unsafe.getByte(maskBuffPtr) != 0) {
-                                System.out.println("mask is not 0 !");
+                        if (TEST_ZERO) {
+                            if (!SKIP_CLEAR_DIRECT || (mask != ZERO)) {
+                                _unsafe.putByte(maskBuffPtr, mask);
                             }
-                            
+                        } else {
                             _unsafe.putByte(maskBuffPtr, mask);
                         }
                         maskBuffPtr += SIZE;
+                        addr += SIZE;
                     }
                 }
             }
 
             if (SKIP_CLEAR_DIRECT) {
-                // LBO: tile is already (0) filled:                        
+                // LBO: tile is already (0) filled:
                 maskBuffPtr += (x1 - cx);
             } else {
                 // fill line end
@@ -358,15 +391,6 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                     cx++;
                 }
             }
-/*
-            if (DO_TRACE) {
-                for (int i = idx - (x1 - x0); i < idx; i++) {
-                    System.out.print(hex(tile[i], 2));
-                }
-                System.out.println();
-            }
-*/
-//            idx += skipRowPixels;
         }
 
         nextTile();
@@ -374,11 +398,346 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
         if (DO_MONITORS) {
             rdrStats.mon_ptg_getAlpha.stop();
         }
-    }    
-    
-    
-// --- former byte[] tile loops:    
-    
+    }
+
+    /**
+     * Gets the alpha coverage values for the current tile.
+     * Either this method, or the nextTile() method should be called
+     * once per tile, but not both.
+     */
+    private void getAlphaRLE(final byte[] tile,
+                               final OGLRenderQueue rq,
+                               final OGLMaskBuffer maskBuffer)
+    {
+        if (DO_MONITORS) {
+            rdrStats.mon_ptg_getAlpha.start();
+        }
+
+        // Decode run-length encoded alpha mask data
+        // The data for row j begins at cache.rowOffsetsRLE[j]
+        // and is encoded as a set of 2-byte pairs (val, runLen)
+        // terminated by a (0, 0) pair.
+
+        // local vars for performance:
+        final MarlinCache _cache = this.cache;
+        final long[] rowAAChunkIndex = _cache.rowAAChunkIndex;
+        final int[] rowAAx0 = _cache.rowAAx0;
+        final int[] rowAAx1 = _cache.rowAAx1;
+        final int[] rowAAEnc = _cache.rowAAEnc;
+        final long[] rowAALen = _cache.rowAALen;
+        final long[] rowAAPos = _cache.rowAAPos;
+
+        final int x0 = this.x;
+        final int x1 = FloatMath.min(x0 + TILE_W, _cache.bboxX1);
+        final int w  = x1 - x0;
+
+        // note: process tile line [0 - 32[
+        final int y0 = 0;
+        final int y1 = FloatMath.min(this.y + TILE_H, _cache.bboxY1) - this.y;
+
+        if (DO_LOG_BOUNDS) {
+            MarlinUtils.logInfo("getAlpha = [" + x0 + " ... " + x1
+                                + "[ [" + y0 + " ... " + y1 + "[");
+        }
+
+        final int h = y1 - y0;
+        // directly write to VRAM
+        final int maskOffset = maskBuffer.allocateMaskData(rq, w * h); // no padding
+
+        final Unsafe _unsafe = OffHeapArray.UNSAFE;
+        final byte ZERO = 0;
+        final long SIZE = 1L;
+        final long SIZE4 = 4L;
+
+        // store mask offset in tile[]:
+        _unsafe.putInt(tile, Unsafe.ARRAY_BYTE_BASE_OFFSET, maskOffset);
+
+        long maskBuffPtr = maskBuffer.getMaskBufferBasePtr() + maskOffset;
+
+        final long addr_rowAA = _cache.rowAAChunk.address;
+        long addr, addr_row, last_addr, addr_end;
+
+        int cx, cy, cx1;
+        int rx0, rx1, runLen, end;
+        int packed;
+        byte val;
+
+        if (SKIP_CLEAR_DIRECT) {
+            // System.out.println("getAlphaRLE(direct) SKIP_CLEAR_DIRECT");
+            // Tile is already zero-filled
+
+            for (cy = y0; cy < y1; cy++) {
+                // empty line (default)
+                cx = x0;
+
+                if (rowAAEnc[cy] == 0) {
+                    // Raw encoding:
+
+                    final int aax1 = rowAAx1[cy]; // exclusive
+
+                    // quick check if there is AA data
+                    // corresponding to this tile [x0; x1[
+                    if (aax1 > x0) {
+                        final int aax0 = rowAAx0[cy]; // inclusive
+
+                        if (aax0 < x1) {
+                            // note: cx is the cursor pointer in the tile array
+                            // (left to right)
+                            cx = aax0;
+
+                            // ensure cx >= x0
+                            if (cx <= x0) {
+                                cx = x0;
+                            } else {
+                                // skip line start until first AA pixel rowAA exclusive:
+                                maskBuffPtr += (cx - x0); // > 0
+                            }
+
+                            // now: cx >= x0 and cx >= aax0
+
+                            // Copy AA data (sum alpha data):
+                            addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
+
+                            for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                                _unsafe.putByte(maskBuffPtr, _unsafe.getByte(addr)); // [0-255]
+                                maskBuffPtr += SIZE;
+                                addr += SIZE;
+                            }
+                        }
+                    }
+                } else {
+                    // RLE encoding:
+
+                    // quick check if there is AA data
+                    // corresponding to this tile [x0; x1[
+                    if (rowAAx1[cy] > x0) { // last pixel exclusive
+
+                        cx = rowAAx0[cy]; // inclusive
+                        if (cx > x1) {
+                            cx = x1;
+                        }
+
+                        // skip line start until first AA pixel rowAA exclusive:
+                        if (cx > x0) {
+                            maskBuffPtr += (cx - x0); // > 0
+                        }
+
+                        // get row address:
+                        addr_row = addr_rowAA + rowAAChunkIndex[cy];
+                        // get row end address:
+                        addr_end = addr_row + rowAALen[cy]; // coded length
+
+                        // reuse previous iteration position:
+                        addr = addr_row + rowAAPos[cy];
+
+                        last_addr = 0L;
+
+                        while ((cx < x1) && (addr < addr_end)) {
+                            // keep current position:
+                            last_addr = addr;
+
+                            // packed value:
+                            packed = _unsafe.getInt(addr);
+
+                            // last exclusive pixel x-coordinate:
+                            cx1 = (packed >> 8);
+                            // as bytes:
+                            addr += SIZE4;
+
+                            rx0 = cx;
+                            if (rx0 < x0) {
+                                rx0 = x0;
+                            }
+                            rx1 = cx = cx1;
+                            if (rx1 > x1) {
+                                rx1 = x1;
+                                cx  = x1; // fix last x
+                            }
+                            // adjust runLen:
+                            runLen = rx1 - rx0;
+
+                            // ensure rx1 > rx0:
+                            if (runLen > 0) {
+                                packed &= 0xFF; // [0-255]
+
+                                if (packed == 0)
+                                {
+                                    maskBuffPtr += runLen;
+                                    continue;
+                                }
+                                val = (byte) packed; // [0-255]
+                                // TODO: try COPY4 or COPY8 ?
+                                do {
+                                    _unsafe.putByte(maskBuffPtr, val);
+                                    maskBuffPtr += SIZE;
+                                } while (--runLen > 0);
+                            }
+                        }
+
+                        // Update last position in RLE entries:
+                        if (last_addr != 0L) {
+                            // Fix x0:
+                            rowAAx0[cy]  = cx; // inclusive
+                            // Fix position:
+                            rowAAPos[cy] = (last_addr - addr_row);
+                        }
+                    }
+                }
+
+                // skip line end
+                if (cx < x1) {
+                    maskBuffPtr += (x1 - cx); // > 0
+                }
+            }
+        } else {
+            // System.out.println("getAlphaRLE(direct) NO SKIP_CLEAR_DIRECT: not tested ");
+
+            for (cy = y0; cy < y1; cy++) {
+                // empty line (default)
+                cx = x0;
+
+                if (rowAAEnc[cy] == 0) {
+                    // Raw encoding:
+
+                    final int aax1 = rowAAx1[cy]; // exclusive
+
+                    // quick check if there is AA data
+                    // corresponding to this tile [x0; x1[
+                    if (aax1 > x0) {
+                        final int aax0 = rowAAx0[cy]; // inclusive
+
+                        if (aax0 < x1) {
+                            // note: cx is the cursor pointer in the tile array
+                            // (left to right)
+                            cx = aax0;
+
+                            // ensure cx >= x0
+                            if (cx <= x0) {
+                                cx = x0;
+                            } else {
+                                if (SKIP_CLEAR_DIRECT) {
+                                    // LBO: tile is already (0) filled:
+                                    maskBuffPtr += (cx - x0);
+                                } else {
+                                    // fill line start until first AA pixel rowAA exclusive:
+                                    for (end = x0; end < cx; end++) {
+                                        _unsafe.putByte(maskBuffPtr, ZERO);
+                                        maskBuffPtr += SIZE;
+                                    }
+                                }
+                            }
+
+                            // now: cx >= x0 and cx >= aax0
+
+                            // Copy AA data (sum alpha data):
+                            addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
+
+                            for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                                _unsafe.putByte(maskBuffPtr, _unsafe.getByte(addr)); // [0-255]
+                                maskBuffPtr += SIZE;
+                                addr += SIZE;
+                            }
+                        }
+                    }
+                } else {
+                    // RLE encoding:
+
+                    // quick check if there is AA data
+                    // corresponding to this tile [x0; x1[
+                    if (rowAAx1[cy] > x0) { // last pixel exclusive
+
+                        cx = rowAAx0[cy]; // inclusive
+                        if (cx > x1) {
+                            cx = x1;
+                        }
+
+                        // fill line start until first AA pixel rowAA exclusive:
+                        for (end = x0; end < cx; end++) {
+                            _unsafe.putByte(maskBuffPtr, ZERO);
+                            maskBuffPtr += SIZE;
+                        }
+
+                        // get row address:
+                        addr_row = addr_rowAA + rowAAChunkIndex[cy];
+                        // get row end address:
+                        addr_end = addr_row + rowAALen[cy]; // coded length
+
+                        // reuse previous iteration position:
+                        addr = addr_row + rowAAPos[cy];
+
+                        last_addr = 0L;
+
+                        while ((cx < x1) && (addr < addr_end)) {
+                            // keep current position:
+                            last_addr = addr;
+
+                            // packed value:
+                            packed = _unsafe.getInt(addr);
+
+                            // last exclusive pixel x-coordinate:
+                            cx1 = (packed >> 8);
+                            // as bytes:
+                            addr += SIZE4;
+
+                            rx0 = cx;
+                            if (rx0 < x0) {
+                                rx0 = x0;
+                            }
+                            rx1 = cx = cx1;
+                            if (rx1 > x1) {
+                                rx1 = x1;
+                                cx  = x1; // fix last x
+                            }
+                            // adjust runLen:
+                            runLen = rx1 - rx0;
+
+                            // ensure rx1 > rx0:
+                            if (runLen > 0) {
+                                packed &= 0xFF; // [0-255]
+
+                                val = (byte) packed; // [0-255]
+                                // TODO: try COPY4 or COPY8 ?
+                                do {
+                                    _unsafe.putByte(maskBuffPtr, val);
+                                    maskBuffPtr += SIZE;
+                                } while (--runLen > 0);
+                            }
+                        }
+
+                        // Update last position in RLE entries:
+                        if (last_addr != 0L) {
+                            // Fix x0:
+                            rowAAx0[cy]  = cx; // inclusive
+                            // Fix position:
+                            rowAAPos[cy] = (last_addr - addr_row);
+                        }
+                    }
+                }
+
+                // fill line end
+                if (SKIP_CLEAR_DIRECT) {
+                    // LBO: tile is already (0) filled:
+                    maskBuffPtr += (x1 - cx);
+                } else {
+                    // fill line end
+                    while (cx < x1) {
+                        _unsafe.putByte(maskBuffPtr, ZERO);
+                        maskBuffPtr += SIZE;
+                        cx++;
+                    }
+                }
+            }
+        }
+
+        nextTile();
+
+        if (DO_MONITORS) {
+            rdrStats.mon_ptg_getAlpha.stop();
+        }
+    }
+
+// --- former byte[] tile loops:
+
     /**
      * Gets the alpha coverage values for the current tile.
      * Either this method, or the nextTile() method should be called

@@ -134,7 +134,7 @@ public final class MarlinProperties {
     }
 
     public static boolean isForceNoRLE() {
-        return getBoolean("sun.java2d.renderer.forceNoRLE", "true"); // required by OpenGL DIRECT HACK
+        return getBoolean("sun.java2d.renderer.forceNoRLE", "false");
     }
 
     public static boolean isUseTileFlags() {

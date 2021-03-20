@@ -48,7 +48,7 @@ public class OGLMaskFill extends BufferedMaskFill {
 
     private final static boolean USE_OPTIMIZE_FILL = true;
 
-    public static boolean USE_DIRECT_TILE = false;
+    public static final int MASK_SCAN_FOR_DIRECT_TILE = -1024;
 
     static {
         System.out.println("USE_OPTIMIZE_FILL: " + USE_OPTIMIZE_FILL);
@@ -119,14 +119,12 @@ public class OGLMaskFill extends BufferedMaskFill {
             if (mask != null) {
                 final Unsafe UNSAFE = OGLMaskBuffer.UNSAFE;
                 
-                if (USE_DIRECT_TILE) {
-                    USE_DIRECT_TILE = false;
-                    
+                if (maskscan == MASK_SCAN_FOR_DIRECT_TILE) {
                     maskOffset = UNSAFE.getInt(mask, Unsafe.ARRAY_BYTE_BASE_OFFSET);
                     
                     // System.out.println("use mask at [" + maskOffset + "] (" + w + " x " + h + ")");
                 } else {
-                    System.out.println("Not direct tile");
+                    // System.out.println("Not direct tile");
                     final int len = w * h;
 
                     final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();

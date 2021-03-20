@@ -32,7 +32,7 @@ import static sun.java2d.pipe.BufferedOpCodes.MASK_BUFFER_FENCE;
 
 public class OGLMaskBuffer {
 
-    public static final int MASK_BUFFER_REGION_COUNT = 4; // LBO: too low ?
+    public static final int MASK_BUFFER_REGION_COUNT = 4;
     public static final int MASK_BUFFER_REGION_SIZE = 4 * 1024 * 1024; // LBO: 4Mb seems faster
     public static final int MASK_BUFFER_SIZE = MASK_BUFFER_REGION_SIZE * MASK_BUFFER_REGION_COUNT;
 
@@ -99,16 +99,27 @@ public class OGLMaskBuffer {
 
     public final int allocateMaskData(final RenderQueue queue, final int maskSize) {
         int offsetBefore = currentBufferOffset;
+
+        // System.out.println("Requested " +maskSize +" offset before: " + offsetBefore);
         final int regionBefore = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
+
+        // LBO: fix offset before out of bound checks:
+        // Align offset to multiple of 8
+        currentBufferOffset = (currentBufferOffset + 7) & ~7;
 
         if (currentBufferOffset + maskSize >= MASK_BUFFER_SIZE) {
             offsetBefore = currentBufferOffset = 0;
         }
+
         currentBufferOffset += maskSize;
+
         int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
 
         if (regionBefore != regionAfter) {
             // System.out.println("need another buffer region: " + regionAfter);
+
+            offsetBefore = (MASK_BUFFER_REGION_SIZE * regionAfter);
+            currentBufferOffset = offsetBefore + maskSize;
 
             queue.ensureCapacity(12);
 
@@ -120,34 +131,42 @@ public class OGLMaskBuffer {
             boolean nextRegionPending;
 
             synchronized (pendingFences) {
-                // why + 2 clemens ?
-                waitRegion = (regionBefore + 1) % MASK_BUFFER_REGION_COUNT;
-//                waitRegion = regionAfter;
+                // Optimization: Queue the wait for a fence one region before we actually need the region to be available.
+                // Therefore we might save a few flushNow() synchronizations,
+                // because the wait for region we need has been queued before (and maybe flushed because other draw calls)
+                // E.g.: region 3 was just filled up -> place fence for region 3
+                // and queue a wait for region region 1.
+                // region 0's wait we require now was placed earlier, and might have been processed without an explicit flushNow
+                waitRegion = (regionBefore + 2) % MASK_BUFFER_REGION_COUNT;
                 if (!pendingFences[waitRegion]) {
                     waitRegion = -1;
                 }
                 buffer.putInt(waitRegion);
+                //System.out.println("BUF: placing fence for:"+regionBefore+" waiting for: "+waitRegion);
 
                 // enable in case async flush is available
                 //queue.flushNow(false);
                 pendingFences[regionBefore] = true;
 
+                // We need the next region now, so check, if it is already available (fence was waited on earlier)
                 nextRegionPending = pendingFences[regionAfter];
             }
 
+            // If fence was not met, we have to explicitly flush, the wait has been queued earlier,
+            // but was not yet processed by the OpenGL queue thread.
             int fenceCounter = 0;
             while (nextRegionPending) {
-                // System.out.println("waiting for region (queue flush now) ...");
+                //System.out.println("explicit flush");
                 queue.flushNow();
 
                 synchronized (pendingFences) {
                     nextRegionPending = pendingFences[regionAfter];
                 }
 
+                // should not happen in sync flush mode
                 if (fenceCounter > 0) {
-                    System.out.println(fenceCounter);
+                    throw new RuntimeException("Aborting fence stall");
                 }
-
                 fenceCounter++;
             }
         }

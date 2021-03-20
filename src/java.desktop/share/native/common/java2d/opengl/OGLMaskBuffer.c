@@ -67,11 +67,6 @@ OGLMaskBuffer_FlushMaskCache()
     int vertexCnt = curVertPos - lastVertPos;
 
     if(vertexCnt > 0) {
-
-        // We've just crossed a region boundary (1->2)
-        // Area 1 is now full (place fence)
-        // Area 2 is now written to
-
        // printf("DrawArrays: %d, %d\n", lastVertPos, vertexCnt);
         j2d_glDrawArrays(GL_QUADS, lastVertPos, vertexCnt);
 
@@ -88,18 +83,21 @@ void OGLMaskBuffer_QueueMaskBufferFence(JNIEnv *env, OGLContext *oglc, jint fenc
 
     OGLMaskBuffer_FlushMaskCache();
 
-    GLuint zero = 0;
-    j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, fenceRegion * MASK_BUFFER_REGION_SIZE, MASK_BUFFER_REGION_SIZE,  GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+    // GLuint zero = 0;
+    // j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, fenceRegion * MASK_BUFFER_REGION_SIZE, MASK_BUFFER_REGION_SIZE,  GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
 
     maskSyncs[fenceRegion] = j2d_glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
 
     j2d_glFlush();
 
+   // waitRegion = fenceRegion;
+
     if(waitRegion >= 0) {
         waitForFence(maskSyncs[waitRegion]);
         maskSyncs[waitRegion] = NULL;
 
-       // printf("calling available with %d\n", waitRegion);
+        // use memset until j2d_glClearBufferSubData works well
+        memset(&maskBuffer[waitRegion * MASK_BUFFER_REGION_SIZE], 0, MASK_BUFFER_REGION_SIZE);
         (*env)->CallStaticVoidMethod(env, maskBufferCls, setFenceAvailableId, waitRegion);
     }
 }
@@ -240,8 +238,9 @@ why INT buffer (faster than byte ?) as it causes alignment issues !
   j2d_glBufferStorage(GL_SHADER_STORAGE_BUFFER, bufferSize, 0, flags);
   maskBuffer = (unsigned char*) j2d_glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, bufferSize, flags );
 
-  GLuint zero = 0;
-  j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, 0, bufferSize, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+  // GLuint zero = 0;
+  // j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, 0, bufferSize, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+  memset(maskBuffer, 0, bufferSize);
 
   printf("Buffer address from java: %d\n", maskBuffer);
 
@@ -254,12 +253,12 @@ why INT buffer (faster than byte ?) as it causes alignment issues !
 
 JNIEXPORT jlong JNICALL
 Java_sun_java2d_opengl_OGLMaskBuffer_allocateVertexBufferPtr(JNIEnv *env, jobject self, jint size) {
-  //Vertex-Data per Mask-Quad: 1 Vertex = 8*sizeof(float) = 32 byte
-  vtxBufferSize = size / 32;
-  vtxPerArea = vtxBufferSize / 3;
-
-  vtxPerArea -= vtxPerArea % 4;
+  //Vertex-Data per Mask-Quad: 1 Vertex = 8*sizeof(float) = 32 byte -> 4 Quad = 128 byte
+  jint quadsPerRegion = (size / 3) / 128;
+  vtxPerArea = quadsPerRegion * 4;
   vtxBufferSize = vtxPerArea * 3;
+
+  printf("Vertices per Area: %d\n", vtxPerArea);
 
   size = vtxBufferSize * 32;
 
@@ -311,8 +310,13 @@ OGLMaskBuffer_DisableMaskBuffer(OGLContext *oglc)
 
     OGLMaskBuffer_FlushMaskCache();
 
+        if (oglc->paintState == sun_java2d_SunGraphics2D_PAINT_ALPHACOLOR) {
+            OGLPaints_SetColor(oglc, oglc->pixel);
+        }
+
    j2d_glDisableVertexAttribArray(1);
    j2d_glDisableVertexAttribArray(0);
+
    j2d_glUseProgramObjectARB(0);
 }
 
@@ -320,7 +324,7 @@ OGLMaskBuffer_DisableMaskBuffer(OGLContext *oglc)
 void waitForFence(GLsync sync) {
     GLenum waitReturn;
     do {
-        waitReturn = j2d_glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000);
+        waitReturn = j2d_glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 100000);
     } while( waitReturn != GL_ALREADY_SIGNALED && waitReturn != GL_CONDITION_SATISFIED);
 
     j2d_glDeleteSync( sync );
@@ -331,6 +335,10 @@ void queueMaskQuad(int dstX, int dstY, int w, int h, int maskOffset, int r, int 
     // We'll cross region boundary with this quad, so make sure the GPU is done with the vtx data previsouly stored here
     // TODO: Make sure region size aligns perfectly with quad vertex count (4), so we can do the check below
     if(curVertPos % vtxPerArea == 0) {
+        // We've just crossed a region boundary (1->2)
+        // Area x is now full (place fence)
+        // Area x+1 is now written to
+
         //if(curVertPos == vtxBufferSize)
         {
             OGLMaskBuffer_FlushMaskCache();
@@ -339,18 +347,18 @@ void queueMaskQuad(int dstX, int dstY, int w, int h, int maskOffset, int r, int 
         int nextRegion = curVertPos / vtxPerArea;
         int lastRegion = (nextRegion + 2) % 3;
 
-       // printf("Fence was placed: %d, %d\n",lastRegion, nextRegion );
+        //printf("VTX: Fence was placed: %d, %d\n",lastRegion, nextRegion );
 
         if(vtxSyncs[lastRegion] != NULL) {
-            printf("Sync was in progress! %d\n", lastRegion);
+            printf("VTX: Sync was in progress! %d\n", lastRegion);
         }
 
         vtxSyncs[lastRegion] = j2d_glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
 
-
-        GLsync nextSync = vtxSyncs[nextRegion];
+      //TODO: Test-Code - Sync immediatly the queued fence
+        GLsync nextSync = vtxSyncs[nextRegion]; //vtxSyncs[lastRegion]; //
         if(nextSync != NULL) {
-           // printf("waiting for fence, vtxPer: %d, %d\n", nextRegion, vtxPerArea);
+          //  printf("VTX: waiting for fence, vtxPer: %d, %d\n", nextRegion, vtxPerArea);
 
             waitForFence(nextSync);
             vtxSyncs[nextRegion] = NULL;

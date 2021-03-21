@@ -29,7 +29,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <GL/gl.h>
+#include "gl.h"
 
 
 #if defined(USE_MGL_NAMESPACE)

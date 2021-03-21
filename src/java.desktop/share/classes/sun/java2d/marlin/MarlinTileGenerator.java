@@ -229,13 +229,11 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
     private final static boolean SKIP_CLEAR_DIRECT = true; // slightly better (true)
     private final static boolean COPY_8 = true; // ??
     private final static boolean COPY_4 = true; // ??
-    private final static boolean TEST_ZERO = true; // ??
 
     static {
         System.out.println("SKIP_CLEAR_DIRECT: " + SKIP_CLEAR_DIRECT);
         System.out.println("COPY_8:            " + COPY_8);
         System.out.println("COPY_4:            " + COPY_4);
-        System.out.println("TEST_ZERO:         " + TEST_ZERO);
     }
 
     /**
@@ -291,7 +289,6 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
         long addr;
 
         int aax0, aax1, end;
-        byte mask;
 
         for (int cy = y0, cx; cy < y1; cy++) {
             // empty line (default)
@@ -336,25 +333,21 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                         // System.out.println("copy len: " + (end - cx));
 
                         // Unaligned only supported by x86-64:
-                        if (COPY_8 && (end - cx) > 8) {
+                        if (COPY_8 && (end - cx) >= 8) {
                             cx += 8; // forward
-                            for (; cx < end; cx += 8) {
+                            for (; cx <= end; cx += 8) {
                                 // cx inside tile[x0; x1[ :
-                                // tile[idx++] = _unsafe.getByte(addr); // [0-255]
                                 _unsafe.putLong(maskBuffPtr, _unsafe.getLong(addr)); // same alignment: certainly not ?
-
                                 maskBuffPtr += SIZE8;
                                 addr += SIZE8;
                             }
                             cx -= 8; // backward
                         }
-                        if (COPY_4 && (end - cx) > 4) {
+                        if (COPY_4 && (end - cx) >= 4) {
                             cx += 4; // forward
-                            for (; cx < end; cx += 4) {
+                            for (; cx <= end; cx += 4) {
                                 // cx inside tile[x0; x1[ :
-                                // tile[idx++] = _unsafe.getByte(addr); // [0-255]
                                 _unsafe.putInt(maskBuffPtr, _unsafe.getInt(addr)); // same alignment: certainly not ?
-
                                 maskBuffPtr += SIZE4;
                                 addr += SIZE4;
                             }
@@ -364,16 +357,7 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
 
                     for (; cx < end; cx++) {
                         // cx inside tile[x0; x1[ :
-                        // tile[idx++] = _unsafe.getByte(addr); // [0-255]
-                        mask = _unsafe.getByte(addr); // [0-255]
-
-                        if (TEST_ZERO) {
-                            if (!SKIP_CLEAR_DIRECT || (mask != ZERO)) {
-                                _unsafe.putByte(maskBuffPtr, mask);
-                            }
-                        } else {
-                            _unsafe.putByte(maskBuffPtr, mask);
-                        }
+                        _unsafe.putByte(maskBuffPtr, _unsafe.getByte(addr)); // [0-255]
                         maskBuffPtr += SIZE;
                         addr += SIZE;
                     }
@@ -448,6 +432,7 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
         final byte ZERO = 0;
         final long SIZE = 1L;
         final long SIZE4 = 4L;
+        final long SIZE8 = 8L;
 
         // store mask offset in tile[]:
         _unsafe.putInt(tile, Unsafe.ARRAY_BYTE_BASE_OFFSET, maskOffset);
@@ -461,6 +446,8 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
         int rx0, rx1, runLen, end;
         int packed;
         byte val;
+        long mask8;
+        int mask4;
 
         if (SKIP_CLEAR_DIRECT) {
             // System.out.println("getAlphaRLE(direct) SKIP_CLEAR_DIRECT");
@@ -498,7 +485,36 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                             // Copy AA data (sum alpha data):
                             addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
 
-                            for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                            end = (aax1 <= x1) ? aax1 : x1;
+
+                            if (COPY_8 || COPY_4) {
+                                // System.out.println("copy len: " + (end - cx));
+
+                                // Unaligned only supported by x86-64:
+                                if (COPY_8 && (end - cx) >= 8) {
+                                    cx += 8; // forward
+                                    for (; cx <= end; cx += 8) {
+                                        // cx inside tile[x0; x1[ :
+                                        _unsafe.putLong(maskBuffPtr, _unsafe.getLong(addr)); // same alignment: certainly not ?
+                                        maskBuffPtr += SIZE8;
+                                        addr += SIZE8;
+                                    }
+                                    cx -= 8; // backward
+                                }
+                                if (COPY_4 && (end - cx) >= 4) {
+                                    cx += 4; // forward
+                                    for (; cx <= end; cx += 4) {
+                                        // cx inside tile[x0; x1[ :
+                                        _unsafe.putInt(maskBuffPtr, _unsafe.getInt(addr)); // same alignment: certainly not ?
+                                        maskBuffPtr += SIZE4;
+                                        addr += SIZE4;
+                                    }
+                                    cx -= 4; // backward
+                                }
+                            }
+
+                            for (; cx < end; cx++) {
+                                // cx inside tile[x0; x1[ :
                                 _unsafe.putByte(maskBuffPtr, _unsafe.getByte(addr)); // [0-255]
                                 maskBuffPtr += SIZE;
                                 addr += SIZE;
@@ -565,12 +581,41 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                                     maskBuffPtr += runLen;
                                     continue;
                                 }
-                                val = (byte) packed; // [0-255]
-                                // TODO: try COPY4 or COPY8 ?
-                                do {
-                                    _unsafe.putByte(maskBuffPtr, val);
-                                    maskBuffPtr += SIZE;
-                                } while (--runLen > 0);
+
+                                if (COPY_8 || COPY_4) {
+                                    // System.out.println("copy len: " + (end - cx));
+                                    mask4 = (packed << 24) | (packed << 16) | (packed << 8) | packed;
+
+                                    // Unaligned only supported by x86-64:
+                                    if (COPY_8 && (runLen >= 8)) {
+                                        mask8 = mask4;
+                                        mask8 = (mask8 << 32L) | mask4;
+
+                                        runLen -= 8; // forward
+                                        for (; runLen >= 0; runLen -= 8) {
+                                            // cx inside tile[x0; x1[ :
+                                            _unsafe.putLong(maskBuffPtr, mask8); // same alignment: certainly not ?
+                                            maskBuffPtr += SIZE8;
+                                        }
+                                        runLen += 8; // backward
+                                    }
+                                    if (COPY_4 && (runLen >= 4)) {
+                                        runLen -= 4; // forward
+                                        for (; runLen >= 0; runLen -= 4) {
+                                            // cx inside tile[x0; x1[ :
+                                            _unsafe.putInt(maskBuffPtr, mask4); // same alignment: certainly not ?
+                                            maskBuffPtr += SIZE4;
+                                        }
+                                        runLen += 4; // backward
+                                    }
+                                }
+                                if (runLen > 0) {
+                                    val = (byte) packed; // [0-255]
+                                    do {
+                                        _unsafe.putByte(maskBuffPtr, val);
+                                        maskBuffPtr += SIZE;
+                                    } while (--runLen > 0);
+                                }
                             }
                         }
 
@@ -615,15 +660,10 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                             if (cx <= x0) {
                                 cx = x0;
                             } else {
-                                if (SKIP_CLEAR_DIRECT) {
-                                    // LBO: tile is already (0) filled:
-                                    maskBuffPtr += (cx - x0);
-                                } else {
-                                    // fill line start until first AA pixel rowAA exclusive:
-                                    for (end = x0; end < cx; end++) {
-                                        _unsafe.putByte(maskBuffPtr, ZERO);
-                                        maskBuffPtr += SIZE;
-                                    }
+                                // fill line start until first AA pixel rowAA exclusive:
+                                for (end = x0; end < cx; end++) {
+                                    _unsafe.putByte(maskBuffPtr, ZERO);
+                                    maskBuffPtr += SIZE;
                                 }
                             }
 
@@ -632,7 +672,38 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                             // Copy AA data (sum alpha data):
                             addr = addr_rowAA + rowAAChunkIndex[cy] + (cx - aax0);
 
-                            for (end = (aax1 <= x1) ? aax1 : x1; cx < end; cx++) {
+                            end = (aax1 <= x1) ? aax1 : x1;
+
+                            if (COPY_8 || COPY_4) {
+                                // System.out.println("copy len: " + (end - cx));
+
+                                // Unaligned only supported by x86-64:
+                                if (COPY_8 && (end - cx) >= 8) {
+                                    cx += 8; // forward
+                                    for (; cx <= end; cx += 8) {
+                                        // cx inside tile[x0; x1[ :
+                                        _unsafe.putLong(maskBuffPtr, _unsafe.getLong(addr)); // same alignment: certainly not ?
+
+                                        maskBuffPtr += SIZE8;
+                                        addr += SIZE8;
+                                    }
+                                    cx -= 8; // backward
+                                }
+                                if (COPY_4 && (end - cx) >= 4) {
+                                    cx += 4; // forward
+                                    for (; cx <= end; cx += 4) {
+                                        // cx inside tile[x0; x1[ :
+                                        _unsafe.putInt(maskBuffPtr, _unsafe.getInt(addr)); // same alignment: certainly not ?
+
+                                        maskBuffPtr += SIZE4;
+                                        addr += SIZE4;
+                                    }
+                                    cx -= 4; // backward
+                                }
+                            }
+
+                            for (; cx < end; cx++) {
+                                // cx inside tile[x0; x1[ :
                                 _unsafe.putByte(maskBuffPtr, _unsafe.getByte(addr)); // [0-255]
                                 maskBuffPtr += SIZE;
                                 addr += SIZE;
@@ -695,12 +766,40 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                             if (runLen > 0) {
                                 packed &= 0xFF; // [0-255]
 
-                                val = (byte) packed; // [0-255]
-                                // TODO: try COPY4 or COPY8 ?
-                                do {
-                                    _unsafe.putByte(maskBuffPtr, val);
-                                    maskBuffPtr += SIZE;
-                                } while (--runLen > 0);
+                                if (COPY_8 || COPY_4) {
+                                    // System.out.println("copy len: " + (end - cx));
+                                    mask4 = (packed << 24) | (packed << 16) | (packed << 8) | packed;
+
+                                    // Unaligned only supported by x86-64:
+                                    if (COPY_8 && (runLen >= 8)) {
+                                        mask8 = mask4;
+                                        mask8 = (mask8 << 32L) | mask4;
+
+                                        runLen -= 8; // forward
+                                        for (; runLen >= 0; runLen -= 8) {
+                                            // cx inside tile[x0; x1[ :
+                                            _unsafe.putLong(maskBuffPtr, mask8); // same alignment: certainly not ?
+                                            maskBuffPtr += SIZE8;
+                                        }
+                                        runLen += 8; // backward
+                                    }
+                                    if (COPY_4 && (runLen >= 4)) {
+                                        runLen -= 4; // forward
+                                        for (; runLen >= 0; runLen -= 4) {
+                                            // cx inside tile[x0; x1[ :
+                                            _unsafe.putInt(maskBuffPtr, mask4); // same alignment: certainly not ?
+                                            maskBuffPtr += SIZE4;
+                                        }
+                                        runLen += 4; // backward
+                                    }
+                                }
+                                if (runLen > 0) {
+                                    val = (byte) packed; // [0-255]
+                                    do {
+                                        _unsafe.putByte(maskBuffPtr, val);
+                                        maskBuffPtr += SIZE;
+                                    } while (--runLen > 0);
+                                }
                             }
                         }
 
@@ -715,16 +814,10 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
                 }
 
                 // fill line end
-                if (SKIP_CLEAR_DIRECT) {
-                    // LBO: tile is already (0) filled:
-                    maskBuffPtr += (x1 - cx);
-                } else {
-                    // fill line end
-                    while (cx < x1) {
-                        _unsafe.putByte(maskBuffPtr, ZERO);
-                        maskBuffPtr += SIZE;
-                        cx++;
-                    }
+                while (cx < x1) {
+                    _unsafe.putByte(maskBuffPtr, ZERO);
+                    maskBuffPtr += SIZE;
+                    cx++;
                 }
             }
         }

@@ -46,9 +46,9 @@ public final class AAShapePipe
     implements ShapeDrawPipe, ParallelogramPipe
 {
     static final RenderingEngine RDR_ENGINE = RenderingEngine.getInstance();
-    
+
     static final boolean TILE_PADDING = false; // false to disable tile padding (faster)
-    
+
     static {
         System.out.println("AAShapePipe: TILE_PADDING = " + TILE_PADDING);
     }
@@ -170,9 +170,9 @@ public final class AAShapePipe
             context = outpipe.startSequence(sg, s,
                                             ts.computeDevBox(abox),
                                             abox);
-            
+
             final boolean useDirect = (sg.alphafill instanceof OGLMaskFill); // weak test (Quick and dirty)
-            
+
             // copy of int[] abox as local variables for performance:
             final int x0 = abox[0];
             final int y0 = abox[1];
@@ -192,7 +192,7 @@ public final class AAShapePipe
                 for (int x = x0; x < x1; x += tw) {
                     final int w = Math.min(tw, x1 - x);
                     // LBO: use w instead of tw to avoid row padding:
-                    final int maskscan = (useDirect) ? OGLMaskFill.MASK_SCAN_FOR_DIRECT_TILE: 
+                    final int maskscan = (useDirect) ? OGLMaskFill.MASK_SCAN_FOR_DIRECT_TILE:
                                             ((TILE_PADDING) ? tw : w);
 
                     final int a = aatg.getTypicalAlpha();
@@ -207,7 +207,7 @@ public final class AAShapePipe
                         aatg.nextTile();
                     } else {
                         atile = alpha;
-                        
+
                         if (useDirect) {
                             aatg.getAlphaDirect(atile);
                         } else {

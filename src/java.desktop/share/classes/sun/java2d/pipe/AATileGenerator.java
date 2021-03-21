@@ -109,7 +109,7 @@ public interface AATileGenerator {
      * once per tile, but not both.
      */
     public void getAlphaDirect(byte[] tile);
-    
+
     /**
      * Disposes this tile generator.
      * No further calls will be made on this instance.

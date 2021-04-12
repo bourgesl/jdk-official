@@ -700,6 +700,9 @@ Java_sun_java2d_opengl_OGLRenderQueue_flushBuffer
     if (oglc != NULL) {
         RESET_PREVIOUS_OP();
         if (sync) {
+            if (1) {
+                OGLMaskBuffer_FlushMaskCache(env, sync);
+            }
             j2d_glFinish();
         } else {
             j2d_glFlush();

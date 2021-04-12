@@ -47,9 +47,13 @@ public final class AAShapePipe
 {
     static final RenderingEngine RDR_ENGINE = RenderingEngine.getInstance();
 
+    // experimental (direct pipeline): artefacts happen in parallel rendering (2 locks)
+    private final static boolean USE_DIRECT_OGL_MASK_FILL = "true".equalsIgnoreCase(System.getProperty("OGLMaskFill.direct", "false"));
+
     static final boolean TILE_PADDING = false; // false to disable tile padding (faster)
 
     static {
+        System.out.println("AAShapePipe: OGLMaskFill.direct = " + USE_DIRECT_OGL_MASK_FILL);
         System.out.println("AAShapePipe: TILE_PADDING = " + TILE_PADDING);
     }
 
@@ -171,7 +175,7 @@ public final class AAShapePipe
                                             ts.computeDevBox(abox),
                                             abox);
 
-            final boolean useDirect = (sg.alphafill instanceof OGLMaskFill); // weak test (Quick and dirty)
+            final boolean useDirect = (USE_DIRECT_OGL_MASK_FILL && sg.alphafill instanceof OGLMaskFill); // weak test (Quick and dirty)
 
             // copy of int[] abox as local variables for performance:
             final int x0 = abox[0];
@@ -192,7 +196,7 @@ public final class AAShapePipe
                 for (int x = x0; x < x1; x += tw) {
                     final int w = Math.min(tw, x1 - x);
                     // LBO: use w instead of tw to avoid row padding:
-                    final int maskscan = (useDirect) ? OGLMaskFill.MASK_SCAN_FOR_DIRECT_TILE:
+                    final int maskscan = (USE_DIRECT_OGL_MASK_FILL && useDirect) ? OGLMaskFill.MASK_SCAN_FOR_DIRECT_TILE:
                                             ((TILE_PADDING) ? tw : w);
 
                     final int a = aatg.getTypicalAlpha();

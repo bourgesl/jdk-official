@@ -207,19 +207,15 @@ final class MarlinTileGenerator implements AATileGenerator, MarlinConst {
 
         rq.lock();
         try {
-            if (false) {
-                System.out.println("Not implemented.");
+            // should validate before ?
+            // validateContext(sg2d, comp, BufferedContext.USE_MASK);
+
+            final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
+
+            if (cache.useRLE) {
+                getAlphaRLE(tile, rq, maskBuffer);
             } else {
-                // should validate before ?
-                // validateContext(sg2d, comp, BufferedContext.USE_MASK);
-
-                final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
-
-                if (cache.useRLE) {
-                    getAlphaRLE(tile, rq, maskBuffer);
-                } else {
-                    getAlphaNoRLE(tile, rq, maskBuffer);
-                }
+                getAlphaNoRLE(tile, rq, maskBuffer);
             }
         } finally {
             rq.unlock();

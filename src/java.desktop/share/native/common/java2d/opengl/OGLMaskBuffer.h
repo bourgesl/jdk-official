@@ -29,7 +29,7 @@
 #include "j2d_md.h"
 #include "OGLContext.h"
 
-void OGLMaskBuffer_FlushMaskCache();
+void OGLMaskBuffer_FlushMaskCache(JNIEnv *env, jboolean sync);
 
 void OGLMaskBuffer_EnableMaskBuffer(OGLContext *oglc);
 void OGLMaskBuffer_DisableMaskBuffer(OGLContext *oglc);
@@ -40,6 +40,7 @@ void OGLMaskBuffer_AddMaskQuadTurbo(OGLContext *oglc,
                            jint srcx, jint srcy,
                            jint w, jint h, jint maskOffset);
 
+GLsync createFence();
 void waitForFence(GLsync sync);
 
 void OGLMaskBuffer_QueueMaskBufferFence(JNIEnv *env, OGLContext *oglc, jint fenceRegion, jint waitRegion);

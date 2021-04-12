@@ -111,6 +111,9 @@ public class OGLMaskFill extends BufferedMaskFill {
         try {
             validateContext(sg2d, comp, BufferedContext.USE_MASK);
 
+            // Ensure OGLMask buffer is initialized within lock:
+            final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
+            
             rq.ensureCapacity(24);
             final RenderBuffer buf = rq.getBuffer();
 
@@ -127,7 +130,6 @@ public class OGLMaskFill extends BufferedMaskFill {
                     // System.out.println("Not direct tile");
                     final int len = w * h;
 
-                    final OGLMaskBuffer maskBuffer = OGLMaskBuffer.getInstance();
                     maskOffset = maskBuffer.allocateMaskData(rq, len);
 
                     // directly write to VRAM

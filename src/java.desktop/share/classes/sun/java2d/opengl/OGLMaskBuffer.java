@@ -33,10 +33,19 @@ import static sun.java2d.pipe.BufferedOpCodes.MASK_BUFFER_FENCE;
 public class OGLMaskBuffer {
 
     public static final int MASK_BUFFER_REGION_COUNT = 4;
-    public static final int MASK_BUFFER_REGION_SIZE = 4 * 1024 * 1024; // LBO: 4Mb seems faster
+    public static final int MASK_BUFFER_REGION_SIZE = Integer.valueOf(System.getProperty("OGLMaskBuffer.region", "4194304")); // 4 * 1024 * 1024; // LBO: 4Mb seems faster
     public static final int MASK_BUFFER_SIZE = MASK_BUFFER_REGION_SIZE * MASK_BUFFER_REGION_COUNT;
 
+    public static final boolean TRACE = "true".equalsIgnoreCase(System.getProperty("OGLMaskBuffer.trace", "false"));
+    
+    public static void trace(final String msg) {
+        final long now = System.nanoTime();
+        System.out.println("" + now + " : " + msg);
+    }
+    
     static {
+        System.out.println("OGLMaskBuffer: OGLMaskBuffer.trace = " + TRACE);
+        System.out.println("OGLMaskBuffer: OGLMaskBuffer.region = " + MASK_BUFFER_REGION_SIZE);
         System.out.println("MASK_BUFFER_REGION_COUNT: " + MASK_BUFFER_REGION_COUNT);
         System.out.println("MASK_BUFFER_REGION_SIZE: " + MASK_BUFFER_REGION_SIZE);
         System.out.println("MASK_BUFFER_SIZE: " + MASK_BUFFER_SIZE);
@@ -59,13 +68,13 @@ public class OGLMaskBuffer {
     int currentVtxPos;
     int lastVtxPos;
 
-    private volatile static OGLMaskBuffer buffer;
+    private volatile static OGLMaskBuffer buffer = null;
 
     public static final Unsafe UNSAFE;
 
     private static int BUFFER_ARRAY_STRIDE = 1;
 
-    private final static boolean pendingFences[] = new boolean[MASK_BUFFER_REGION_COUNT];
+    private final static boolean[] pendingFences = new boolean[MASK_BUFFER_REGION_COUNT];
 
     static {
         UNSAFE = Unsafe.getUnsafe();
@@ -84,7 +93,6 @@ public class OGLMaskBuffer {
                 }
             }
         }
-
         return buffer;
     }
 
@@ -113,7 +121,7 @@ public class OGLMaskBuffer {
 
         currentBufferOffset += maskSize;
 
-        int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
+        final int regionAfter = currentBufferOffset / MASK_BUFFER_REGION_SIZE;
 
         if (regionBefore != regionAfter) {
             // System.out.println("need another buffer region: " + regionAfter);
@@ -123,9 +131,9 @@ public class OGLMaskBuffer {
 
             queue.ensureCapacity(12);
 
-            final RenderBuffer buffer = queue.getBuffer();
-            buffer.putInt(MASK_BUFFER_FENCE);
-            buffer.putInt(regionBefore);
+            final RenderBuffer buf = queue.getBuffer();
+            buf.putInt(MASK_BUFFER_FENCE);
+            buf.putInt(regionBefore);
 
             int waitRegion;
             boolean nextRegionPending;
@@ -137,12 +145,15 @@ public class OGLMaskBuffer {
                 // E.g.: region 3 was just filled up -> place fence for region 3
                 // and queue a wait for region region 1.
                 // region 0's wait we require now was placed earlier, and might have been processed without an explicit flushNow
-                waitRegion = (regionBefore + 2) % MASK_BUFFER_REGION_COUNT;
+                waitRegion = (regionBefore  + 2) % MASK_BUFFER_REGION_COUNT; // was (n + 2) % 4
                 if (!pendingFences[waitRegion]) {
                     waitRegion = -1;
                 }
-                buffer.putInt(waitRegion);
-                //System.out.println("BUF: placing fence for:"+regionBefore+" waiting for: "+waitRegion);
+                buf.putInt(waitRegion);
+
+                if (TRACE) {
+                    trace("placing fence for:" + regionBefore + " waiting for: " + waitRegion);
+                }
 
                 // enable in case async flush is available
                 //queue.flushNow(false);
@@ -156,7 +167,9 @@ public class OGLMaskBuffer {
             // but was not yet processed by the OpenGL queue thread.
             int fenceCounter = 0;
             while (nextRegionPending) {
-                //System.out.println("explicit flush");
+                if (TRACE) {
+                    trace("explicit flush: waiting for fence on: " + regionAfter);
+                }
                 queue.flushNow();
 
                 synchronized (pendingFences) {
@@ -165,7 +178,7 @@ public class OGLMaskBuffer {
 
                 // should not happen in sync flush mode
                 if (fenceCounter > 0) {
-                    throw new RuntimeException("Aborting fence stall");
+                    throw new RuntimeException("Aborting fence stall on region: " + regionAfter);
                 }
                 fenceCounter++;
             }
@@ -180,7 +193,9 @@ public class OGLMaskBuffer {
 
     private static void setFenceAvailable(int fenceNum) {
         synchronized (pendingFences) {
-            // System.out.println("Fence available: " + fenceNum);
+            if (TRACE) {
+                trace("Fence available: " + fenceNum);
+            }
             pendingFences[fenceNum] = false;
         }
     }

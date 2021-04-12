@@ -153,9 +153,9 @@ public class OGLRenderQueue extends RenderQueue {
     }
 
     private class QueueFlusher implements Runnable {
-        private boolean needsFlush;
-        private Runnable task;
-        private Error error;
+        private volatile boolean needsFlush;
+        private volatile Runnable task;
+        private volatile Error error;
         private final Thread thread;
 
         public QueueFlusher() {

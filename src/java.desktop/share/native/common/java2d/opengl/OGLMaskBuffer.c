@@ -59,6 +59,7 @@ static GLsync vtxSyncs[3];
 static GLsync maskSyncs[4]; // see java: MASK_BUFFER_REGION_COUNT
 
 #define DO_SYNC_WAIT_FENCES 0
+#define DO_ZERO_FILL 0
 
 static int fenceCount;
 
@@ -103,8 +104,10 @@ OGLMaskBuffer_FlushMaskCache(JNIEnv *env, jboolean sync)
                 waitForFence(maskSyncs[region]);
                 maskSyncs[region] = NULL;
 
-                // use memset until j2d_glClearBufferSubData works well
-                memset(&maskBuffer[region * MASK_BUFFER_REGION_SIZE], 0, MASK_BUFFER_REGION_SIZE);
+                if (DO_ZERO_FILL) {
+                    // use memset until j2d_glClearBufferSubData works well
+                    memset(&maskBuffer[region * MASK_BUFFER_REGION_SIZE], 0, MASK_BUFFER_REGION_SIZE);
+                }
                 (*env)->CallStaticVoidMethod(env, maskBufferCls, setFenceAvailableId, region);
             }
         }
@@ -137,8 +140,10 @@ void OGLMaskBuffer_QueueMaskBufferFence(JNIEnv *env, OGLContext *oglc, jint fenc
             waitForFence(maskSyncs[waitRegion]);
             maskSyncs[waitRegion] = NULL;
 
-            // use memset until j2d_glClearBufferSubData works well
-            memset(&maskBuffer[waitRegion * MASK_BUFFER_REGION_SIZE], 0, MASK_BUFFER_REGION_SIZE);
+            if (DO_ZERO_FILL) {
+                // use memset until j2d_glClearBufferSubData works well
+                memset(&maskBuffer[waitRegion * MASK_BUFFER_REGION_SIZE], 0, MASK_BUFFER_REGION_SIZE);
+            }
             (*env)->CallStaticVoidMethod(env, maskBufferCls, setFenceAvailableId, waitRegion);
         }
     }
@@ -280,11 +285,14 @@ why INT buffer (faster than byte ?) as it causes alignment issues !
   j2d_glBufferStorage(GL_SHADER_STORAGE_BUFFER, bufferSize, 0, flags);
   maskBuffer = (unsigned char*) j2d_glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, bufferSize, flags );
 
-  // GLuint zero = 0;
-  // j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, 0, bufferSize, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
-  memset(maskBuffer, 0, bufferSize);
+  if (DO_ZERO_FILL) {
+    // GLuint zero = 0;
+    // j2d_glClearBufferSubData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, 0, bufferSize, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+    memset(maskBuffer, 0, bufferSize);
+  }
 
   printf("Buffer address from java: %d\n", maskBuffer);
+  printf("DO_ZERO_FILL: %d\n", DO_ZERO_FILL);
 
   fenceCount = 0;
 
@@ -373,8 +381,7 @@ GLsync createFence() {
         }
         printf("createFence: WARNING: glFenceSync() returns null (fenceCount = %d)\n", fenceCount);
     } else {
-        fenceCount++;
-        // printf("createFence: fenceCount = %d\n", fenceCount);
+        // printf("createFence: fenceCount = %d\n", ++fenceCount);
     }
     return sync;
 }
@@ -386,8 +393,7 @@ void waitForFence(GLsync sync) {
     } while( waitReturn != GL_ALREADY_SIGNALED && waitReturn != GL_CONDITION_SATISFIED);
 
     j2d_glDeleteSync( sync );
-    fenceCount--;
-    // printf("waitForFence: fenceCount = %d\n", fenceCount);
+    // printf("waitForFence: fenceCount = %d\n", --fenceCount);
 }
 
 
@@ -465,5 +471,8 @@ OGLMaskBuffer_AddMaskQuadTurbo(OGLContext *oglc,
 
     queueMaskQuad(dstx, dsty, w, h, maskOffset, oglc->r, oglc->g, oglc->b, oglc->a, 1);
 }
+
+#undef DO_SYNC_WAIT_FENCES
+#undef DO_ZERO_FILL
 
 #endif /* !HEADLESS */

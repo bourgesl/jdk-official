@@ -72,7 +72,11 @@ import sun.awt.SunToolkit;
 public abstract class RenderQueue {
 
     /** The size of the underlying buffer, in bytes. */
-    private static final int BUFFER_SIZE = 32000;
+    private static final int BUFFER_SIZE = Integer.valueOf(System.getProperty("RenderQueue.buffer", "32000"));
+
+    static {
+        System.out.println("RenderQueue: RenderQueue.buffer = " + BUFFER_SIZE);
+    }
 
     /** The underlying buffer for this queue. */
     protected RenderBuffer buf;

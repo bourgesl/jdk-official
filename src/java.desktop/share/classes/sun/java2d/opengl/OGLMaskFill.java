@@ -47,11 +47,13 @@ import sun.misc.Unsafe;
 public class OGLMaskFill extends BufferedMaskFill {
 
     private final static boolean USE_OPTIMIZE_FILL = true;
+    private final static boolean ZERO_FILLED = false;
 
     public static final int MASK_SCAN_FOR_DIRECT_TILE = -256*256;
 
     static {
         System.out.println("USE_OPTIMIZE_FILL: " + USE_OPTIMIZE_FILL);
+        System.out.println("ZERO_FILLED:       " + ZERO_FILLED);
         System.out.println("Unsafe.ARRAY_BYTE_BASE_OFFSET: " + Unsafe.ARRAY_BYTE_BASE_OFFSET);
     }
 
@@ -143,7 +145,7 @@ public class OGLMaskFill extends BufferedMaskFill {
                             for (int m = 0; m < w; m++) {
                                 byte source = mask[maskoff + maskscan * i + m];
                                 //System.out.println(source);
-                                if (source != ZERO) {
+                                if (!ZERO_FILLED || (source != ZERO)) {
                                     UNSAFE.putByte(maskBuffPtr, source);
                                 }
                                 maskBuffPtr++;
@@ -172,7 +174,7 @@ public class OGLMaskFill extends BufferedMaskFill {
                             // Remaining bytes:
                             for (; j < l; j++) {
                                 final byte source = UNSAFE.getByte(mask, off + j);
-                                if (source != ZERO) {
+                                if (!ZERO_FILLED || (source != ZERO)) {
                                     UNSAFE.putByte(maskBuffPtr, source);
                                 }
                                 maskBuffPtr++;
@@ -195,7 +197,7 @@ public class OGLMaskFill extends BufferedMaskFill {
                                 // Remaining bytes:
                                 for (; j < w; j++) {
                                     final byte source = UNSAFE.getByte(mask, offRow + j);
-                                    if (source != ZERO) {
+                                    if (!ZERO_FILLED || (source != ZERO)) {
                                         UNSAFE.putByte(maskBuffPtr, source);
                                     }
                                     maskBuffPtr++;
